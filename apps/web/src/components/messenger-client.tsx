@@ -9,6 +9,24 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "@/lib/api-base";
 
+function formatApiError(status: number, bodyText: string): string {
+  try {
+    const parsed = JSON.parse(bodyText) as {
+      message?: string | string[];
+    };
+    if (Array.isArray(parsed.message)) {
+      return parsed.message.join("\n");
+    }
+    if (typeof parsed.message === "string") {
+      return parsed.message;
+    }
+  } catch {
+    // not JSON
+  }
+  const trimmed = bodyText.trim();
+  return trimmed.length > 0 ? trimmed : `Request failed (${status})`;
+}
+
 type AuthUser = {
   id: string;
   email: string;
@@ -49,13 +67,18 @@ export function MessengerClient() {
 
   const register = useCallback(async () => {
     setError(null);
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || password.length < 8) {
+      setError("Enter a valid email and a password of at least 8 characters.");
+      return;
+    }
     const res = await fetch(`${apiBase}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: trimmedEmail, password }),
     });
     if (!res.ok) {
-      setError(await res.text());
+      setError(formatApiError(res.status, await res.text()));
       return;
     }
     const data = (await res.json()) as {
@@ -68,13 +91,18 @@ export function MessengerClient() {
 
   const login = useCallback(async () => {
     setError(null);
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || password.length < 8) {
+      setError("Enter a valid email and a password of at least 8 characters.");
+      return;
+    }
     const res = await fetch(`${apiBase}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: trimmedEmail, password }),
     });
     if (!res.ok) {
-      setError(await res.text());
+      setError(formatApiError(res.status, await res.text()));
       return;
     }
     const data = (await res.json()) as {
@@ -111,7 +139,7 @@ export function MessengerClient() {
       body: JSON.stringify({ memberIds: [otherUserId.trim()] }),
     });
     if (!res.ok) {
-      setError(await res.text());
+      setError(formatApiError(res.status, await res.text()));
       return;
     }
     await refreshConversations();
