@@ -13,17 +13,10 @@ import {
   View,
 } from "react-native";
 import { io, type Socket } from "socket.io-client";
-
-function getApiBase(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_API_URL;
-  if (fromEnv && fromEnv.length > 0) {
-    return fromEnv.replace(/\/$/, "");
-  }
-  return "http://localhost:4000";
-}
+import { getApiBaseUrl } from "./api-base";
 
 export function MessengerRoot() {
-  const apiBase = useMemo(() => getApiBase(), []);
+  const apiBase = useMemo(() => getApiBaseUrl(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState<string | null>(null);

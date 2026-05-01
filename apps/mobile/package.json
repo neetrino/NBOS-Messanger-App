@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@app-messenger/shared": "workspace:*",
+    "dotenv": "^17.4.2",
     "expo": "~54.0.33",
+    "expo-constants": "^55.0.15",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",

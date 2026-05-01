@@ -2,13 +2,14 @@
   "name": "app-messenger",
   "private": true,
   "scripts": {
-    "dev:api": "pnpm --filter @app-messenger/api start:dev",
+    "dev": "pnpm run db:generate && pnpm --parallel --filter @app-messenger/api --filter @app-messenger/web run dev",
+    "dev:api": "pnpm --filter @app-messenger/api dev",
     "dev:web": "pnpm --filter @app-messenger/web dev",
     "dev:mobile": "pnpm --filter @app-messenger/mobile start",
     "build": "pnpm -r run build",
     "db:generate": "pnpm --filter @app-messenger/api run prisma:generate",
-    "db:migrate": "pnpm --filter @app-messenger/api exec prisma migrate dev",
-    "db:push": "pnpm --filter @app-messenger/api exec prisma db push"
+    "db:migrate": "pnpm --filter @app-messenger/api run prisma:migrate",
+    "db:push": "pnpm --filter @app-messenger/api run prisma:push"
   },
   "engines": {
     "node": ">=20"
