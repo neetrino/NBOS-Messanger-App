@@ -9,7 +9,8 @@
     "build": "pnpm -r run build",
     "db:generate": "pnpm --filter @app-messenger/api run prisma:generate",
     "db:migrate": "pnpm --filter @app-messenger/api run prisma:migrate",
-    "db:push": "pnpm --filter @app-messenger/api run prisma:push"
+    "db:push": "pnpm --filter @app-messenger/api run prisma:push",
+    "db:seed": "pnpm --filter @app-messenger/api run db:seed"
   },
   "engines": {
     "node": ">=20"

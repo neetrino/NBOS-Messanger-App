@@ -21,7 +21,11 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "dotenv -e ../../.env -e .env -- prisma generate",
     "prisma:migrate": "dotenv -e ../../.env -e .env -- prisma migrate dev",
-    "prisma:push": "dotenv -e ../../.env -e .env -- prisma db push"
+    "prisma:push": "dotenv -e ../../.env -e .env -- prisma db push",
+    "db:seed": "dotenv -e ../../.env -e .env -- prisma db seed"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.cjs"
   },
   "dependencies": {
     "@app-messenger/shared": "workspace:*",

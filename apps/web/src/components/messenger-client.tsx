@@ -36,6 +36,9 @@ type AuthUser = {
 
 type Conversation = { id: string; title: string | null; createdAt: string };
 
+const DEMO_EMAIL = "alice@demo.local";
+const DEMO_PASSWORD = "demo1234";
+
 type MessageRow = {
   id: string;
   conversationId: string;
@@ -46,8 +49,6 @@ type MessageRow = {
 
 export function MessengerClient() {
   const apiBase = useMemo(() => getApiBaseUrl(), []);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,41 +66,12 @@ export function MessengerClient() {
     return { Authorization: `Bearer ${token}` };
   }, [token]);
 
-  const register = useCallback(async () => {
+  const loginDemo = useCallback(async () => {
     setError(null);
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || password.length < 8) {
-      setError("Enter a valid email and a password of at least 8 characters.");
-      return;
-    }
-    const res = await fetch(`${apiBase}/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: trimmedEmail, password }),
-    });
-    if (!res.ok) {
-      setError(formatApiError(res.status, await res.text()));
-      return;
-    }
-    const data = (await res.json()) as {
-      accessToken: string;
-      user: AuthUser;
-    };
-    setToken(data.accessToken);
-    setUser(data.user);
-  }, [apiBase, email, password]);
-
-  const login = useCallback(async () => {
-    setError(null);
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || password.length < 8) {
-      setError("Enter a valid email and a password of at least 8 characters.");
-      return;
-    }
     const res = await fetch(`${apiBase}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: trimmedEmail, password }),
+      body: JSON.stringify({ email: DEMO_EMAIL, password: DEMO_PASSWORD }),
     });
     if (!res.ok) {
       setError(formatApiError(res.status, await res.text()));
@@ -111,7 +83,11 @@ export function MessengerClient() {
     };
     setToken(data.accessToken);
     setUser(data.user);
-  }, [apiBase, email, password]);
+  }, [apiBase]);
+
+  useEffect(() => {
+    void loginDemo();
+  }, [loginDemo]);
 
   const refreshConversations = useCallback(async () => {
     if (!authHeaders) {
@@ -127,6 +103,13 @@ export function MessengerClient() {
   useEffect(() => {
     void refreshConversations();
   }, [refreshConversations]);
+
+  useEffect(() => {
+    if (conversations.length === 0 || activeConversationId) {
+      return;
+    }
+    setActiveConversationId(conversations[0].id);
+  }, [conversations, activeConversationId]);
 
   const createConversation = useCallback(async () => {
     if (!authHeaders || !otherUserId.trim()) {
@@ -157,7 +140,7 @@ export function MessengerClient() {
       return;
     }
     const rows = (await res.json()) as MessageRow[];
-    setMessages(rows.reverse());
+    setMessages(rows);
   }, [activeConversationId, apiBase, authHeaders]);
 
   useEffect(() => {
@@ -216,43 +199,7 @@ export function MessengerClient() {
       ) : null}
 
       {!user ? (
-        <section className="flex flex-col gap-2 max-w-md">
-          <label className="flex flex-col gap-1">
-            <span>Email</span>
-            <input
-              className="border rounded px-2 py-1 text-base"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span>Password (min 8)</span>
-            <input
-              type="password"
-              className="border rounded px-2 py-1 text-base"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="border rounded px-3 py-1 bg-neutral-900 text-white"
-              onClick={() => void register()}
-            >
-              Register
-            </button>
-            <button
-              type="button"
-              className="border rounded px-3 py-1"
-              onClick={() => void login()}
-            >
-              Login
-            </button>
-          </div>
-        </section>
+        <p className="text-neutral-600">Signing in as demo user…</p>
       ) : (
         <>
           <p>

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Conversation, Message } from '@prisma/client';
+import type { Message } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -14,7 +14,7 @@ export class ConversationsService {
   async createForMembers(params: {
     title?: string;
     memberIds: string[];
-  }): Promise<Conversation> {
+  }) {
     const unique = [...new Set(params.memberIds)];
     if (unique.length < 2) {
       throw new BadRequestException(
@@ -38,10 +38,17 @@ export class ConversationsService {
     });
   }
 
-  listForUser(userId: string): Promise<Conversation[]> {
+  listForUser(userId: string) {
     return this.prisma.conversation.findMany({
       where: { members: { some: { userId } } },
       orderBy: { createdAt: 'desc' },
+      include: {
+        members: {
+          include: {
+            user: { select: { id: true, email: true, name: true } },
+          },
+        },
+      },
     });
   }
 
@@ -62,10 +69,11 @@ export class ConversationsService {
     take = 50,
   ): Promise<Message[]> {
     await this.assertMember(userId, conversationId);
-    return this.prisma.message.findMany({
+    const rows = await this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'desc' },
       take: Math.min(take, 100),
     });
+    return rows.reverse();
   }
 }
