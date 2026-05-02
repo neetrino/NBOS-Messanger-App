@@ -49,6 +49,29 @@ function conversationLabel(c: ConversationRow, meId: string | undefined): string
   return others.length ? others.join(", ") : "Chat";
 }
 
+function isUnreachableNetworkError(message: string): boolean {
+  return (
+    message.includes("Network request failed") ||
+    message.includes("Failed to fetch")
+  );
+}
+
+function formatBootLoginError(e: unknown, apiBase: string): string {
+  const base = e instanceof Error ? e.message : "Login failed";
+  if (!isUnreachableNetworkError(base)) {
+    return base;
+  }
+  return [
+    base,
+    "",
+    `Հեռախոսը չի հասնում API-ին (${apiBase})։`,
+    "• PC-ն և հեռախոսը նույն Wi‑Fi ցանցում արա",
+    "• repository root `.env` — EXPO_PUBLIC_API_URL=http://<PC_WiFi_IP>:4000",
+    "  (Windows՝ ipconfig → Wireless LAN IPv4)",
+    "• Կամ repo/apps/mobile-ում՝ pnpm dev:tunnel",
+  ].join("\n");
+}
+
 export function MessengerRoot() {
   const apiBase = useMemo(() => getApiBaseUrl(), []);
   const [token, setToken] = useState<string | null>(null);
@@ -145,7 +168,7 @@ export function MessengerRoot() {
         await loginAs(u.email);
       } catch (e) {
         if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : "Login failed");
+          setLoadError(formatBootLoginError(e, apiBase));
         }
       } finally {
         if (!cancelled) {
@@ -273,12 +296,22 @@ export function MessengerRoot() {
   }
 
   if (loadError && !token) {
+    const showSeedHint = !isUnreachableNetworkError(loadError);
     return (
       <View style={styles.centered}>
-        <Text style={styles.error}>{loadError}</Text>
-        <Text style={styles.muted}>
-          Ավելացրու seed՝ `pnpm db:seed` (repo root)
-        </Text>
+        <ScrollView
+          style={styles.errorScroll}
+          contentContainerStyle={styles.errorScrollContent}
+        >
+          <Text style={styles.error} selectable>
+            {loadError}
+          </Text>
+        </ScrollView>
+        {showSeedHint ? (
+          <Text style={styles.muted}>
+            Ավելացրու seed՝ `pnpm db:seed` (repo root)
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -476,7 +509,9 @@ const styles = StyleSheet.create({
   },
   convChipText: { fontSize: 13, color: "#333" },
   convChipTextOn: { color: "#fff", fontWeight: "600" },
-  error: { color: "#b00020", textAlign: "center" },
+  errorScroll: { maxHeight: "55%", width: "100%" },
+  errorScrollContent: { paddingHorizontal: 8 },
+  error: { color: "#b00020", textAlign: "left" },
   errorBanner: {
     backgroundColor: "#ffebee",
     color: "#b00020",

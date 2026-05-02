@@ -4,7 +4,6 @@ import path from "node:path";
 
 const repoRoot = path.join(__dirname, "..", "..");
 dotenv.config({ path: path.join(repoRoot, ".env") });
-dotenv.config({ path: path.join(__dirname, ".env"), override: true });
 
 type AppJsonShape = { expo: Record<string, unknown> };
 

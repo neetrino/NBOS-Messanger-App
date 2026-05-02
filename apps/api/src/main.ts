@@ -7,8 +7,17 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   app.useWebSocketAdapter(new IoAdapter(app));
   const webOrigins = process.env.WEB_ORIGIN;
+  const fromEnv = webOrigins
+    ? webOrigins.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const expoWebDev = ['http://localhost:8081', 'http://127.0.0.1:8081'];
+  const isProd = process.env.NODE_ENV === 'production';
+  const allowList =
+    fromEnv.length > 0
+      ? [...new Set([...fromEnv, ...(isProd ? [] : expoWebDev)])]
+      : null;
   app.enableCors({
-    origin: webOrigins ? webOrigins.split(',').map((s) => s.trim()) : true,
+    origin: allowList ?? true,
     credentials: true,
   });
   app.useGlobalPipes(

@@ -13,10 +13,7 @@ import { UsersModule } from './users/users.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [
-        join(process.cwd(), '..', '..', '.env'),
-        join(process.cwd(), '.env'),
-      ],
+      envFilePath: [join(process.cwd(), '..', '..', '.env')],
     }),
     PrismaModule,
     UsersModule,
