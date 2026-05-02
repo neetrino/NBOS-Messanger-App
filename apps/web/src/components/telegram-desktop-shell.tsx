@@ -296,16 +296,12 @@ export function TelegramDesktopShell({
             <button type="button" className="rounded-full p-2 hover:bg-[#2b5278]/40 hover:text-white" aria-label="Search">
               🔍
             </button>
-            <button
-              type="button"
-              onClick={() => setMenuOpen(true)}
-              className="rounded-full p-2 hover:bg-[#2b5278]/40 hover:text-white"
-              aria-label="More"
-              aria-haspopup="dialog"
-              aria-expanded={menuOpen}
+            <span
+              className="rounded-full p-2 text-[#a8adb7]"
+              aria-hidden="true"
             >
               ⋮
-            </button>
+            </span>
           </div>
         </header>
 

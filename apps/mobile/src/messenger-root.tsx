@@ -633,16 +633,9 @@ export function MessengerRoot() {
                 {socketReady ? "online" : "connecting…"}
               </Text>
             </View>
-            <TouchableOpacity
-              onPress={() => setMenuModalOpen(true)}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              style={styles.headerDotsBtn}
-              activeOpacity={0.65}
-              accessibilityRole="button"
-              accessibilityLabel="Open menu"
-            >
+            <View style={styles.headerDotsBtn}>
               <Text style={styles.headerDots}>⋮</Text>
-            </TouchableOpacity>
+            </View>
           </View>
           {loadError ? <Text style={styles.errorBanner}>{loadError}</Text> : null}
           {!conversationId ? (
