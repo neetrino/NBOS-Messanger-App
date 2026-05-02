@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 type Conversation = { id: string; title: string | null; createdAt: string };
 
@@ -15,6 +16,7 @@ type MessageRow = {
 export type TelegramDesktopShellProps = {
   userEmail: string;
   userId: string;
+  accountKind: "demo" | "session";
   conversations: Conversation[];
   activeConversationId: string;
   onSelectConversation: (id: string) => void;
@@ -27,6 +29,7 @@ export type TelegramDesktopShellProps = {
   otherUserId: string;
   onOtherUserIdChange: (value: string) => void;
   onCreateConversation: () => void;
+  onLogout: () => void;
 };
 
 function convLabel(c: Conversation): string {
@@ -64,6 +67,7 @@ function formatDayLabel(iso: string): string {
 export function TelegramDesktopShell({
   userEmail,
   userId,
+  accountKind,
   conversations,
   activeConversationId,
   onSelectConversation,
@@ -76,9 +80,11 @@ export function TelegramDesktopShell({
   otherUserId,
   onOtherUserIdChange,
   onCreateConversation,
+  onLogout,
 }: TelegramDesktopShellProps) {
   const [search, setSearch] = useState("");
   const [newConvOpen, setNewConvOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -108,15 +114,80 @@ export function TelegramDesktopShell({
     return out;
   }, [messages]);
 
+  const menuOverlay =
+    menuOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+            role="presentation"
+            onClick={() => setMenuOpen(false)}
+          >
+            <div
+              className="w-full max-w-[360px] rounded-2xl border border-[#2a3544] bg-[#17212b] p-5 shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="app-menu-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p
+                id="app-menu-title"
+                className="text-[12px] font-bold uppercase tracking-wide text-[#6d7588]"
+              >
+                Մենյու
+              </p>
+              <div className="mt-4 flex items-center gap-3">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#6c8eef] text-sm font-semibold text-white">
+                  {initials(userEmail)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-semibold text-[#e4e6eb]">{userEmail}</p>
+                  <p className="mt-1 text-[12px] font-semibold text-[#8774e1]">
+                    {accountKind === "demo" ? "Դեմո ռեժիմ" : "Հաշիվ"}
+                  </p>
+                </div>
+              </div>
+              <div className="my-5 h-px bg-[#2a3544]" />
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  className="w-full rounded-xl bg-[#3d1f24] py-3 text-[15px] font-semibold text-[#ff8a8a] hover:bg-[#4a252c]"
+                  onClick={() => {
+                    onLogout();
+                    setMenuOpen(false);
+                  }}
+                >
+                  Դուրս գալ
+                </button>
+                <p className="text-center text-[12px] text-[#6d7588]">
+                  <a className="text-[#6d9fd5] hover:underline" href="/login">
+                    Մուտք
+                  </a>
+                  <span className="text-[#4a5568]"> · </span>
+                  <a className="text-[#6d9fd5] hover:underline" href="/register">
+                    Գրանցում
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <div className="flex h-[min(100dvh,900px)] w-full max-w-[1200px] mx-auto rounded-xl overflow-hidden shadow-2xl border border-[#1a2332]">
+      {menuOverlay}
+
       {/* Sidebar */}
       <aside className="flex w-[min(100%,340px)] shrink-0 flex-col bg-[#292f3f] text-[#e4e6eb] min-w-0">
         <div className="flex items-center gap-2 px-2 py-2.5">
           <button
             type="button"
+            onClick={() => setMenuOpen(true)}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#a8adb7] hover:bg-[#3a3f4f] hover:text-white"
             aria-label="Menu"
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
           >
             <span className="text-xl leading-none">☰</span>
           </button>
@@ -225,7 +296,14 @@ export function TelegramDesktopShell({
             <button type="button" className="rounded-full p-2 hover:bg-[#2b5278]/40 hover:text-white" aria-label="Search">
               🔍
             </button>
-            <button type="button" className="rounded-full p-2 hover:bg-[#2b5278]/40 hover:text-white" aria-label="More">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="rounded-full p-2 hover:bg-[#2b5278]/40 hover:text-white"
+              aria-label="More"
+              aria-haspopup="dialog"
+              aria-expanded={menuOpen}
+            >
               ⋮
             </button>
           </div>

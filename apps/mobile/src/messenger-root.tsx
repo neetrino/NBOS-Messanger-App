@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -15,9 +16,11 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { io, type Socket } from "socket.io-client";
+import { AuthGate } from "./auth-gate";
 import { getApiBaseUrl } from "./api-base";
 import { DEMO_PASSWORD, DEMO_USERS } from "./demo-users";
 
@@ -129,8 +132,11 @@ const TG = {
   muted: "#8b92a0",
 } as const;
 
+type SessionMode = "gate" | "demo" | "jwt";
+
 export function MessengerRoot() {
   const apiBase = useMemo(() => getApiBaseUrl(), []);
+  const [sessionMode, setSessionMode] = useState<SessionMode>("gate");
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [activeDemoIndex, setActiveDemoIndex] = useState(0);
@@ -139,13 +145,36 @@ export function MessengerRoot() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [draft, setDraft] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [booting, setBooting] = useState(true);
+  const [booting, setBooting] = useState(false);
   const [convsLoading, setConvsLoading] = useState(false);
   const [socketReady, setSocketReady] = useState(false);
   const [stack, setStack] = useState<"list" | "chat">("list");
   const [listQuery, setListQuery] = useState("");
+  const [menuModalOpen, setMenuModalOpen] = useState(false);
   const msgListRef = useRef<FlatList<ChatListRow>>(null);
   const socketRef = useRef<Socket | null>(null);
+
+  const performLogout = useCallback(() => {
+    const s = socketRef.current;
+    if (s) {
+      s.removeAllListeners();
+      s.disconnect();
+      socketRef.current = null;
+    }
+    setSocketReady(false);
+    setMenuModalOpen(false);
+    setToken(null);
+    setMe(null);
+    setConversations([]);
+    setConversationId(null);
+    setMessages([]);
+    setDraft("");
+    setListQuery("");
+    setLoadError(null);
+    setStack("list");
+    setActiveDemoIndex(0);
+    setSessionMode("gate");
+  }, []);
 
   const authHeaders = useCallback(
     (t: string) => ({
@@ -213,6 +242,9 @@ export function MessengerRoot() {
   );
 
   useEffect(() => {
+    if (sessionMode !== "demo") {
+      return;
+    }
     let cancelled = false;
     (async () => {
       setBooting(true);
@@ -239,7 +271,7 @@ export function MessengerRoot() {
     return () => {
       cancelled = true;
     };
-  }, [activeDemoIndex, loginAs]);
+  }, [activeDemoIndex, apiBase, loginAs, sessionMode]);
 
   useEffect(() => {
     if (!token) {
@@ -361,6 +393,24 @@ export function MessengerRoot() {
   const topInset =
     Platform.OS === "ios" ? 52 : (StatusBar.currentHeight ?? 0) + 8;
 
+  if (sessionMode === "gate") {
+    return (
+      <AuthGate
+        apiBase={apiBase}
+        onJwtSession={(t, user) => {
+          setLoadError(null);
+          setToken(t);
+          setMe(user);
+          setSessionMode("jwt");
+          setBooting(false);
+        }}
+        onDemo={() => {
+          setSessionMode("demo");
+        }}
+      />
+    );
+  }
+
   if (booting) {
     return (
       <View style={styles.centered}>
@@ -398,12 +448,23 @@ export function MessengerRoot() {
 
   const listHeader = (
     <View style={[styles.listHeaderTop, { paddingTop: topInset }]}>
-      <View style={styles.listToolbar}>
-        <Pressable style={styles.iconBtn} hitSlop={10}>
-          <Text style={styles.iconBtnText}>☰</Text>
-        </Pressable>
-        <Text style={styles.listTitle}>Chats</Text>
-        <View style={{ width: 40 }} />
+      <View style={styles.listToolbar} collapsable={false}>
+        <View style={styles.toolbarSide}>
+          <TouchableOpacity
+            onPress={() => setMenuModalOpen(true)}
+            style={styles.iconBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel="Open menu"
+          >
+            <Text style={styles.iconBtnText}>☰</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.toolbarCenter} pointerEvents="box-none">
+          <Text style={styles.listTitle}>Chats</Text>
+        </View>
+        <View style={styles.toolbarSide} />
       </View>
       <View style={styles.searchWrap}>
         <Text style={styles.searchIcon}>🔍</Text>
@@ -415,31 +476,86 @@ export function MessengerRoot() {
           style={styles.searchInput}
         />
       </View>
-      <View style={styles.personaRow}>
-        {DEMO_USERS.map((u, i) => {
-          const on = i === activeDemoIndex;
-          return (
-            <Pressable
-              key={u.email}
-              onPress={() => setActiveDemoIndex(i)}
-              style={[styles.personaChip, on && styles.personaChipOn]}
-            >
-              <Text style={[styles.personaText, on && styles.personaTextOn]}>
-                {u.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {sessionMode === "demo" ? (
+        <View style={styles.personaRow}>
+          {DEMO_USERS.map((u, i) => {
+            const on = i === activeDemoIndex;
+            return (
+              <Pressable
+                key={u.email}
+                onPress={() => setActiveDemoIndex(i)}
+                style={[styles.personaChip, on && styles.personaChipOn]}
+              >
+                <Text style={[styles.personaText, on && styles.personaTextOn]}>
+                  {u.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.sessionHint} numberOfLines={1}>
+          {me?.email ?? ""}
+        </Text>
+      )}
     </View>
   );
 
+  const meLabel = me ? displayName(me) : "";
+
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
-    >
+    <>
+      <Modal
+        visible={menuModalOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setMenuModalOpen(false)}
+      >
+        <View style={styles.menuModalRoot}>
+          <Pressable
+            style={[StyleSheet.absoluteFillObject, styles.menuModalBackdrop]}
+            onPress={() => setMenuModalOpen(false)}
+            accessibilityLabel="Close menu"
+          />
+          <View style={styles.menuModalCard}>
+            <Text style={styles.menuModalHeading}>Մենյու</Text>
+            <View style={styles.menuModalProfile}>
+              <View style={styles.menuModalAvatar}>
+                <Text style={styles.menuModalAvatarText}>
+                  {initialsFromLabel(meLabel || "?")}
+                </Text>
+              </View>
+              <View style={styles.menuModalProfileText}>
+                <Text style={styles.menuModalName} numberOfLines={1}>
+                  {meLabel || "—"}
+                </Text>
+                <Text style={styles.menuModalEmail} numberOfLines={2} selectable>
+                  {me?.email ?? ""}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.menuModalBadge}>
+              {sessionMode === "demo" ? "Դեմո ռեժիմ" : "Հաշիվ"}
+            </Text>
+            <View style={styles.menuModalDivider} />
+            <TouchableOpacity
+              onPress={performLogout}
+              style={styles.menuModalLogout}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Դուրս գալ"
+            >
+              <Text style={styles.menuModalLogoutText}>Դուրս գալ</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
       {stack === "list" ? (
         <View style={styles.flex}>
           <View style={styles.listHeader}>{listHeader}</View>
@@ -517,7 +633,16 @@ export function MessengerRoot() {
                 {socketReady ? "online" : "connecting…"}
               </Text>
             </View>
-            <Text style={styles.headerDots}>⋮</Text>
+            <TouchableOpacity
+              onPress={() => setMenuModalOpen(true)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.headerDotsBtn}
+              activeOpacity={0.65}
+              accessibilityRole="button"
+              accessibilityLabel="Open menu"
+            >
+              <Text style={styles.headerDots}>⋮</Text>
+            </TouchableOpacity>
           </View>
           {loadError ? <Text style={styles.errorBanner}>{loadError}</Text> : null}
           {!conversationId ? (
@@ -622,7 +747,8 @@ export function MessengerRoot() {
           </View>
         </View>
       )}
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </>
   );
 }
 
@@ -637,28 +763,43 @@ const styles = StyleSheet.create({
     backgroundColor: TG.bg,
   },
   muted: { color: TG.muted, fontSize: 14 },
-  listHeader: { backgroundColor: TG.sidebar },
+  listHeader: {
+    backgroundColor: TG.sidebar,
+    zIndex: 2,
+    ...(Platform.OS === "android" ? { elevation: 6 } : {}),
+  },
   listHeaderTop: { paddingHorizontal: 12, paddingBottom: 10 },
   listToolbar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     marginBottom: 10,
+    minHeight: 44,
+  },
+  toolbarSide: {
+    width: 48,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  toolbarCenter: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
   },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
   },
   iconBtnText: { color: TG.muted, fontSize: 22 },
   listTitle: {
-    flex: 1,
-    textAlign: "center",
     fontSize: 17,
     fontWeight: "600",
     color: TG.text,
+    textAlign: "center",
   },
   searchWrap: {
     flexDirection: "row",
@@ -690,6 +831,12 @@ const styles = StyleSheet.create({
   personaChipOn: { backgroundColor: TG.accent },
   personaText: { fontSize: 13, color: TG.muted },
   personaTextOn: { color: "#fff", fontWeight: "600" },
+  sessionHint: {
+    marginTop: 12,
+    fontSize: 13,
+    color: TG.muted,
+    textAlign: "center",
+  },
   convListContent: { paddingBottom: 24 },
   convRow: {
     flexDirection: "row",
@@ -745,7 +892,90 @@ const styles = StyleSheet.create({
   chatHeaderText: { flex: 1, minWidth: 0 },
   chatTitle: { fontSize: 16, fontWeight: "600", color: TG.text },
   chatSub: { fontSize: 13, color: "#6d9fd5", marginTop: 2 },
-  headerDots: { color: TG.muted, fontSize: 20, paddingHorizontal: 8 },
+  headerDotsBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerDots: { color: TG.muted, fontSize: 20 },
+  menuModalRoot: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  menuModalBackdrop: {
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  menuModalCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: TG.header,
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2a3544",
+  },
+  menuModalHeading: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: TG.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 14,
+  },
+  menuModalProfile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  menuModalAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#6c8eef",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuModalAvatarText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  menuModalProfileText: { flex: 1, minWidth: 0 },
+  menuModalName: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: TG.text,
+  },
+  menuModalEmail: {
+    fontSize: 14,
+    color: TG.muted,
+    marginTop: 4,
+  },
+  menuModalBadge: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    fontSize: 12,
+    fontWeight: "600",
+    color: TG.accent,
+    backgroundColor: "rgba(135, 116, 225, 0.15)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  menuModalDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#2a3544",
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  menuModalLogout: {
+    marginTop: 10,
+    backgroundColor: "#3d1f24",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  menuModalLogoutText: { color: "#ff8a8a", fontSize: 16, fontWeight: "700" },
   errorScroll: { maxHeight: "55%", width: "100%" },
   errorScrollContent: { paddingHorizontal: 8 },
   error: { color: "#ff8a8a", textAlign: "left" },

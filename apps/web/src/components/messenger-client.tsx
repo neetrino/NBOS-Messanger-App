@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "@/lib/api-base";
+import { clearWebSession, readWebSession } from "@/lib/session-storage";
 import { TelegramDesktopShell } from "@/components/telegram-desktop-shell";
 
 function formatApiError(status: number, bodyText: string): string {
@@ -59,6 +60,7 @@ export function MessengerClient() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [accountKind, setAccountKind] = useState<"demo" | "session">("demo");
 
   const authHeaders = useMemo(() => {
     if (!token) {
@@ -87,6 +89,27 @@ export function MessengerClient() {
   }, [apiBase]);
 
   useEffect(() => {
+    const stored = readWebSession();
+    if (stored) {
+      setToken(stored.token);
+      setUser(stored.user);
+      setAccountKind("session");
+      return;
+    }
+    setAccountKind("demo");
+    void loginDemo();
+  }, [loginDemo]);
+
+  const handleLogout = useCallback(() => {
+    clearWebSession();
+    setToken(null);
+    setUser(null);
+    setConversations([]);
+    setActiveConversationId("");
+    setMessages([]);
+    setDraft("");
+    setError(null);
+    setAccountKind("demo");
     void loginDemo();
   }, [loginDemo]);
 
@@ -195,13 +218,22 @@ export function MessengerClient() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-16 text-[#8b92a0]">
+      <div className="flex flex-col items-center justify-center gap-4 py-16 text-[#8b92a0]">
         <p className="text-[15px]">Signing in as demo user…</p>
         {error ? (
           <p className="max-w-md whitespace-pre-wrap text-center text-[13px] text-[#ff8a8a]">
             {error}
           </p>
         ) : null}
+        <p className="text-center text-[13px]">
+          <a className="text-[#6d9fd5] hover:underline" href="/register">
+            Ստեղծել հաշիվ
+          </a>
+          <span className="text-[#5c6370]"> · </span>
+          <a className="text-[#6d9fd5] hover:underline" href="/login">
+            Մուտք
+          </a>
+        </p>
       </div>
     );
   }
@@ -210,6 +242,7 @@ export function MessengerClient() {
     <TelegramDesktopShell
       userEmail={user.email}
       userId={user.id}
+      accountKind={accountKind}
       conversations={conversations}
       activeConversationId={activeConversationId}
       onSelectConversation={setActiveConversationId}
@@ -222,6 +255,7 @@ export function MessengerClient() {
       otherUserId={otherUserId}
       onOtherUserIdChange={setOtherUserId}
       onCreateConversation={() => void createConversation()}
+      onLogout={handleLogout}
     />
   );
 }
