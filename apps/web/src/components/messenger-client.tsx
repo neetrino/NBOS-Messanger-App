@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "@/lib/api-base";
+import { TelegramDesktopShell } from "@/components/telegram-desktop-shell";
 
 function formatApiError(status: number, bodyText: string): string {
   try {
@@ -192,89 +193,35 @@ export function MessengerClient() {
     setDraft("");
   }, [activeConversationId, draft, socket]);
 
-  return (
-    <div className="flex flex-col gap-6 text-sm">
-      {error ? (
-        <p className="text-red-600 whitespace-pre-wrap">{error}</p>
-      ) : null}
-
-      {!user ? (
-        <p className="text-neutral-600">Signing in as demo user…</p>
-      ) : (
-        <>
-          <p>
-            Signed in as <strong>{user.email}</strong> (id:{" "}
-            <code className="text-xs">{user.id}</code>)
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-[#8b92a0]">
+        <p className="text-[15px]">Signing in as demo user…</p>
+        {error ? (
+          <p className="max-w-md whitespace-pre-wrap text-center text-[13px] text-[#ff8a8a]">
+            {error}
           </p>
-          <section className="flex flex-col gap-2 max-w-md">
-            <p className="font-medium">New conversation</p>
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Other user id"
-              value={otherUserId}
-              onChange={(e) => setOtherUserId(e.target.value)}
-            />
-            <button
-              type="button"
-              className="border rounded px-3 py-1 w-fit"
-              onClick={() => void createConversation()}
-            >
-              Create
-            </button>
-          </section>
-          <section className="flex flex-col gap-2">
-            <p className="font-medium">Conversations</p>
-            <ul className="list-disc pl-5">
-              {conversations.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() => setActiveConversationId(c.id)}
-                  >
-                    {c.title ?? c.id}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-          {activeConversationId ? (
-            <section className="flex flex-col gap-2 border rounded p-3">
-              <p className="font-medium">Active: {activeConversationId}</p>
-              <p className="text-neutral-500 text-xs">
-                Socket: {socket?.connected ? "connected" : "…"}
-              </p>
-              <div className="flex flex-col gap-1 max-h-64 overflow-y-auto border rounded p-2 bg-neutral-50">
-                {messages.map((m) => (
-                  <div key={m.id} className="text-xs">
-                    <span className="text-neutral-500">{m.senderId.slice(0, 8)}…</span>
-                    : {m.body}
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  className="border rounded px-2 py-1 flex-1"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      sendMessage();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="border rounded px-3 py-1"
-                  onClick={sendMessage}
-                >
-                  Send
-                </button>
-              </div>
-            </section>
-          ) : null}
-        </>
-      )}
-    </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <TelegramDesktopShell
+      userEmail={user.email}
+      userId={user.id}
+      conversations={conversations}
+      activeConversationId={activeConversationId}
+      onSelectConversation={setActiveConversationId}
+      messages={messages}
+      draft={draft}
+      onDraftChange={setDraft}
+      onSend={sendMessage}
+      socketConnected={Boolean(socket?.connected)}
+      error={error}
+      otherUserId={otherUserId}
+      onOtherUserIdChange={setOtherUserId}
+      onCreateConversation={() => void createConversation()}
+    />
   );
 }

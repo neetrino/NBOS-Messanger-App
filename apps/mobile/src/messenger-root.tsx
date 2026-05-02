@@ -11,6 +11,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -72,6 +73,62 @@ function formatBootLoginError(e: unknown, apiBase: string): string {
   ].join("\n");
 }
 
+function initialsFromLabel(label: string): string {
+  const t = label.trim().slice(0, 2);
+  return t.length > 0 ? t.toUpperCase() : "?";
+}
+
+function formatMsgTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDayKey(iso: string): string {
+  return new Date(iso).toDateString();
+}
+
+function formatDayBanner(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) {
+    return "Today";
+  }
+  const y = new Date(today);
+  y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) {
+    return "Yesterday";
+  }
+  return d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
+}
+
+type ChatListRow =
+  | { kind: "sep"; id: string; label: string }
+  | { kind: "msg"; id: string; m: MessageRow };
+
+function messageRowsWithSeparators(messages: MessageRow[]): ChatListRow[] {
+  const out: ChatListRow[] = [];
+  let lastDay = "";
+  for (const m of messages) {
+    const day = formatDayKey(m.createdAt);
+    if (day !== lastDay) {
+      lastDay = day;
+      out.push({ kind: "sep", id: `sep-${m.id}`, label: formatDayBanner(m.createdAt) });
+    }
+    out.push({ kind: "msg", id: m.id, m });
+  }
+  return out;
+}
+
+const TG = {
+  bg: "#0e1621",
+  sidebar: "#292f3f",
+  header: "#212d3b",
+  accent: "#8774e1",
+  bubbleIn: "#2b5278",
+  text: "#e4e6eb",
+  muted: "#8b92a0",
+} as const;
+
 export function MessengerRoot() {
   const apiBase = useMemo(() => getApiBaseUrl(), []);
   const [token, setToken] = useState<string | null>(null);
@@ -85,7 +142,9 @@ export function MessengerRoot() {
   const [booting, setBooting] = useState(true);
   const [convsLoading, setConvsLoading] = useState(false);
   const [socketReady, setSocketReady] = useState(false);
-  const listRef = useRef<FlatList<MessageRow>>(null);
+  const [stack, setStack] = useState<"list" | "chat">("list");
+  const [listQuery, setListQuery] = useState("");
+  const msgListRef = useRef<FlatList<ChatListRow>>(null);
   const socketRef = useRef<Socket | null>(null);
 
   const authHeaders = useCallback(
@@ -163,6 +222,7 @@ export function MessengerRoot() {
       setMessages([]);
       setConversations([]);
       setLoadError(null);
+      setStack("list");
       try {
         const u = DEMO_USERS[activeDemoIndex];
         await loginAs(u.email);
@@ -286,10 +346,25 @@ export function MessengerRoot() {
     return c ? conversationLabel(c, me?.id) : "Chat";
   }, [conversationId, conversations, me?.id]);
 
+  const filteredConversations = useMemo(() => {
+    const q = listQuery.trim().toLowerCase();
+    if (!q) {
+      return conversations;
+    }
+    return conversations.filter((c) =>
+      conversationLabel(c, me?.id).toLowerCase().includes(q),
+    );
+  }, [conversations, listQuery, me?.id]);
+
+  const chatRows = useMemo(() => messageRowsWithSeparators(messages), [messages]);
+
+  const topInset =
+    Platform.OS === "ios" ? 52 : (StatusBar.currentHeight ?? 0) + 8;
+
   if (booting) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={TG.accent} />
         <Text style={styles.muted}>Բացում…</Text>
       </View>
     );
@@ -316,254 +391,458 @@ export function MessengerRoot() {
     );
   }
 
+  const openChat = (id: string) => {
+    setConversationId(id);
+    setStack("chat");
+  };
+
+  const listHeader = (
+    <View style={[styles.listHeaderTop, { paddingTop: topInset }]}>
+      <View style={styles.listToolbar}>
+        <Pressable style={styles.iconBtn} hitSlop={10}>
+          <Text style={styles.iconBtnText}>☰</Text>
+        </Pressable>
+        <Text style={styles.listTitle}>Chats</Text>
+        <View style={{ width: 40 }} />
+      </View>
+      <View style={styles.searchWrap}>
+        <Text style={styles.searchIcon}>🔍</Text>
+        <TextInput
+          value={listQuery}
+          onChangeText={setListQuery}
+          placeholder="Search"
+          placeholderTextColor={TG.muted}
+          style={styles.searchInput}
+        />
+      </View>
+      <View style={styles.personaRow}>
+        {DEMO_USERS.map((u, i) => {
+          const on = i === activeDemoIndex;
+          return (
+            <Pressable
+              key={u.email}
+              onPress={() => setActiveDemoIndex(i)}
+              style={[styles.personaChip, on && styles.personaChipOn]}
+            >
+              <Text style={[styles.personaText, on && styles.personaTextOn]}>
+                {u.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{convTitle}</Text>
-        <Text style={styles.mutedSmall}>
-          {socketReady ? "Ակտիվ կապ" : "Socket…"} · {apiBase}
-        </Text>
-        <View style={styles.personaRow}>
-          {DEMO_USERS.map((u, i) => {
-            const on = i === activeDemoIndex;
-            return (
-              <Pressable
-                key={u.email}
-                onPress={() => setActiveDemoIndex(i)}
-                style={[styles.personaChip, on && styles.personaChipOn]}
-              >
-                <Text style={[styles.personaText, on && styles.personaTextOn]}>
-                  {u.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      {conversations.length > 1 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.convScroll}
-        >
-          {conversations.map((c) => {
-            const on = c.id === conversationId;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => setConversationId(c.id)}
-                style={[styles.convChip, on && styles.convChipOn]}
-              >
-                <Text
-                  style={[styles.convChipText, on && styles.convChipTextOn]}
-                  numberOfLines={1}
-                >
-                  {conversationLabel(c, me?.id)}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : null}
-
-      {loadError ? (
-        <Text style={styles.errorBanner}>{loadError}</Text>
-      ) : null}
-
-      {convsLoading ? (
-        <View style={styles.listLoading}>
-          <ActivityIndicator />
-        </View>
-      ) : !conversationId ? (
-        <View style={styles.listLoading}>
-          <Text style={styles.muted}>Զրուցարան չկա։ Գործարկիր `pnpm db:seed`</Text>
+      {stack === "list" ? (
+        <View style={styles.flex}>
+          <View style={styles.listHeader}>{listHeader}</View>
+          {loadError ? <Text style={styles.errorBanner}>{loadError}</Text> : null}
+          {convsLoading ? (
+            <View style={styles.listLoading}>
+              <ActivityIndicator color={TG.accent} />
+            </View>
+          ) : filteredConversations.length === 0 ? (
+            <View style={styles.listLoading}>
+              <Text style={styles.muted}>
+                Զրուցարան չկա։ Գործարկիր `pnpm db:seed`
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              style={styles.listFlex}
+              data={filteredConversations}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.convListContent}
+              renderItem={({ item: c }) => {
+                const label = conversationLabel(c, me?.id);
+                const subtitle =
+                  c.members.length > 1
+                    ? `${c.members.length} members`
+                    : "Message";
+                return (
+                  <Pressable
+                    onPress={() => openChat(c.id)}
+                    style={({ pressed }) => [
+                      styles.convRow,
+                      pressed && styles.convRowPressed,
+                    ]}
+                  >
+                    <View style={styles.convAvatar}>
+                      <Text style={styles.convAvatarText}>
+                        {initialsFromLabel(label)}
+                      </Text>
+                    </View>
+                    <View style={styles.convMid}>
+                      <Text style={styles.convName} numberOfLines={1}>
+                        {label}
+                      </Text>
+                      <Text style={styles.convPreview} numberOfLines={1}>
+                        {subtitle}
+                      </Text>
+                    </View>
+                    <Text style={styles.convTime}> </Text>
+                  </Pressable>
+                );
+              }}
+            />
+          )}
         </View>
       ) : (
-        <FlatList
-          ref={listRef}
-          style={styles.listFlex}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          onContentSizeChange={() =>
-            listRef.current?.scrollToEnd({ animated: true })
-          }
-          renderItem={({ item }) => {
-            const mine = item.senderId === me?.id;
-            const sender = conversations
-              .find((c) => c.id === item.conversationId)
-              ?.members.find((m) => m.userId === item.senderId)?.user;
-            const who = sender
-              ? displayName(sender)
-              : item.senderId.slice(0, 6);
-            return (
-              <View
-                style={[
-                  styles.bubbleWrap,
-                  mine ? styles.bubbleMine : styles.bubbleTheirs,
-                ]}
-              >
-                {!mine ? <Text style={styles.bubbleMeta}>{who}</Text> : null}
-                <View
-                  style={[
-                    styles.bubble,
-                    mine ? styles.bubbleBgMine : styles.bubbleBgTheirs,
-                  ]}
-                >
-                  <Text
-                    style={mine ? styles.bubbleTextMine : styles.bubbleTextTheirs}
+        <View style={styles.flex}>
+          <View style={[styles.chatHeader, { paddingTop: topInset }]}>
+            <Pressable
+              onPress={() => setStack("list")}
+              style={styles.backBtn}
+              hitSlop={12}
+            >
+              <Text style={styles.backBtnText}>‹</Text>
+            </Pressable>
+            <View style={styles.chatAvatar}>
+              <Text style={styles.chatAvatarText}>
+                {initialsFromLabel(convTitle)}
+              </Text>
+            </View>
+            <View style={styles.chatHeaderText}>
+              <Text style={styles.chatTitle} numberOfLines={1}>
+                {convTitle}
+              </Text>
+              <Text style={styles.chatSub} numberOfLines={1}>
+                {socketReady ? "online" : "connecting…"}
+              </Text>
+            </View>
+            <Text style={styles.headerDots}>⋮</Text>
+          </View>
+          {loadError ? <Text style={styles.errorBanner}>{loadError}</Text> : null}
+          {!conversationId ? (
+            <View style={styles.listLoading}>
+              <Text style={styles.muted}>No chat</Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={msgListRef}
+              style={styles.listFlex}
+              data={chatRows}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent}
+              onContentSizeChange={() =>
+                msgListRef.current?.scrollToEnd({ animated: true })
+              }
+              renderItem={({ item: row }) => {
+                if (row.kind === "sep") {
+                  return (
+                    <View style={styles.daySep}>
+                      <View style={styles.dayPill}>
+                        <Text style={styles.dayPillText}>{row.label}</Text>
+                      </View>
+                    </View>
+                  );
+                }
+                const item = row.m;
+                const mine = item.senderId === me?.id;
+                const sender = conversations
+                  .find((c) => c.id === item.conversationId)
+                  ?.members.find((m) => m.userId === item.senderId)?.user;
+                const who = sender ? displayName(sender) : item.senderId.slice(0, 6);
+                return (
+                  <View
+                    style={[
+                      styles.bubbleWrap,
+                      mine ? styles.bubbleMine : styles.bubbleTheirs,
+                    ]}
                   >
-                    {item.body}
-                  </Text>
-                </View>
-              </View>
-            );
-          }}
-        />
+                    {!mine ? <Text style={styles.bubbleMeta}>{who}</Text> : null}
+                    <View
+                      style={[
+                        styles.bubble,
+                        mine ? styles.bubbleBgMine : styles.bubbleBgTheirs,
+                      ]}
+                    >
+                      <Text
+                        style={
+                          mine ? styles.bubbleTextMine : styles.bubbleTextTheirs
+                        }
+                      >
+                        {item.body}
+                      </Text>
+                      <Text
+                        style={
+                          mine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs
+                        }
+                      >
+                        {formatMsgTime(item.createdAt)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              }}
+            />
+          )}
+          <View style={styles.composer}>
+            <View style={styles.inputRow}>
+              <Pressable style={styles.inlineIcon} hitSlop={8}>
+                <Text style={styles.inlineIconText}>🙂</Text>
+              </Pressable>
+              <TextInput
+                style={styles.input}
+                placeholder="Message"
+                placeholderTextColor={TG.muted}
+                value={draft}
+                onChangeText={setDraft}
+                multiline
+                maxLength={2000}
+              />
+              <Pressable style={styles.inlineIcon} hitSlop={8}>
+                <Text style={styles.inlineIconText}>📎</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={() => {
+                if (draft.trim()) {
+                  send();
+                }
+              }}
+              disabled={!socketReady || !conversationId}
+              style={({ pressed }) => [
+                styles.roundSend,
+                (!socketReady || !conversationId) && styles.roundSendOff,
+                pressed && draft.trim() && styles.roundSendPressed,
+              ]}
+            >
+              <Text style={styles.roundSendGlyph}>
+                {draft.trim() ? "➤" : "🎤"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
       )}
-
-      <View style={styles.composer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Հաղորդագրություն…"
-          placeholderTextColor="#888"
-          value={draft}
-          onChangeText={setDraft}
-          multiline
-          maxLength={2000}
-        />
-        <Pressable
-          onPress={send}
-          disabled={!socketReady}
-          style={({ pressed }) => [
-            styles.sendBtn,
-            !socketReady && styles.sendBtnDisabled,
-            pressed && socketReady && styles.sendBtnPressed,
-          ]}
-        >
-          <Text style={styles.sendBtnText}>Ուղարկել</Text>
-        </Pressable>
-      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: "#f0f2f5" },
+  flex: { flex: 1, backgroundColor: TG.bg },
   centered: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
     padding: 24,
+    backgroundColor: TG.bg,
   },
-  header: {
-    paddingTop: 48,
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    backgroundColor: "#fff",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ddd",
+  muted: { color: TG.muted, fontSize: 14 },
+  listHeader: { backgroundColor: TG.sidebar },
+  listHeaderTop: { paddingHorizontal: 12, paddingBottom: 10 },
+  listToolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
   },
-  headerTitle: { fontSize: 18, fontWeight: "700", color: "#111" },
-  muted: { color: "#666", fontSize: 14 },
-  mutedSmall: { color: "#888", fontSize: 11, marginTop: 4 },
-  personaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconBtnText: { color: TG.muted, fontSize: 22 },
+  listTitle: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 17,
+    fontWeight: "600",
+    color: TG.text,
+  },
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#242f3d",
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    minHeight: 42,
+  },
+  searchIcon: { fontSize: 14, marginRight: 8, opacity: 0.7 },
+  searchInput: {
+    flex: 1,
+    color: TG.text,
+    fontSize: 15,
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+  },
+  personaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
   personaChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: "#eee",
+    backgroundColor: "#242f3d",
   },
-  personaChipOn: { backgroundColor: "#0a7ea4" },
-  personaText: { fontSize: 13, color: "#333" },
+  personaChipOn: { backgroundColor: TG.accent },
+  personaText: { fontSize: 13, color: TG.muted },
   personaTextOn: { color: "#fff", fontWeight: "600" },
-  convScroll: {
-    flexGrow: 0,
+  convListContent: { paddingBottom: 24 },
+  convRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#e8eaed",
+    paddingVertical: 10,
+    backgroundColor: TG.sidebar,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ccc",
+    borderBottomColor: "#1f2430",
   },
-  convChip: {
-    maxWidth: 200,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#ccc",
+  convRowPressed: { backgroundColor: "#343a4a" },
+  convAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#6c8eef",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
   },
-  convChipOn: {
-    backgroundColor: "#0a7ea4",
-    borderColor: "#0a7ea4",
+  convAvatarText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  convMid: { flex: 1, minWidth: 0 },
+  convName: { fontSize: 16, fontWeight: "600", color: TG.text },
+  convPreview: { fontSize: 14, color: TG.muted, marginTop: 2 },
+  convTime: { width: 8, color: TG.muted, fontSize: 12 },
+  chatHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingBottom: 10,
+    backgroundColor: TG.header,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#1a2836",
   },
-  convChipText: { fontSize: 13, color: "#333" },
-  convChipTextOn: { color: "#fff", fontWeight: "600" },
+  backBtn: {
+    width: 40,
+    height: 40,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 4,
+  },
+  backBtnText: { color: "#6d9fd5", fontSize: 32, marginTop: -4 },
+  chatAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#6c8eef",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  chatAvatarText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  chatHeaderText: { flex: 1, minWidth: 0 },
+  chatTitle: { fontSize: 16, fontWeight: "600", color: TG.text },
+  chatSub: { fontSize: 13, color: "#6d9fd5", marginTop: 2 },
+  headerDots: { color: TG.muted, fontSize: 20, paddingHorizontal: 8 },
   errorScroll: { maxHeight: "55%", width: "100%" },
   errorScrollContent: { paddingHorizontal: 8 },
-  error: { color: "#b00020", textAlign: "left" },
+  error: { color: "#ff8a8a", textAlign: "left" },
   errorBanner: {
-    backgroundColor: "#ffebee",
-    color: "#b00020",
+    backgroundColor: "#3d1f24",
+    color: "#ff8a8a",
     padding: 8,
     textAlign: "center",
     fontSize: 13,
   },
   listLoading: { flex: 1, justifyContent: "center", padding: 24 },
-  listFlex: { flex: 1 },
+  listFlex: { flex: 1, backgroundColor: TG.bg },
   listContent: { padding: 12, paddingBottom: 20 },
+  daySep: { alignItems: "center", paddingVertical: 12 },
+  dayPill: {
+    backgroundColor: "rgba(31, 42, 58, 0.92)",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  dayPillText: { color: TG.muted, fontSize: 12 },
   bubbleWrap: { marginBottom: 10, maxWidth: "88%" },
   bubbleMine: { alignSelf: "flex-end" },
   bubbleTheirs: { alignSelf: "flex-start" },
-  bubbleMeta: { fontSize: 11, color: "#666", marginBottom: 2, marginLeft: 4 },
+  bubbleMeta: { fontSize: 11, color: TG.muted, marginBottom: 2, marginLeft: 4 },
   bubble: {
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    maxWidth: "100%",
   },
-  bubbleBgMine: { backgroundColor: "#0a7ea4" },
-  bubbleBgTheirs: { backgroundColor: "#fff", borderWidth: StyleSheet.hairlineWidth, borderColor: "#e0e0e0" },
+  bubbleBgMine: { backgroundColor: TG.accent, borderBottomRightRadius: 4 },
+  bubbleBgTheirs: {
+    backgroundColor: TG.bubbleIn,
+    borderBottomLeftRadius: 4,
+  },
   bubbleTextMine: { color: "#fff", fontSize: 16 },
-  bubbleTextTheirs: { color: "#111", fontSize: 16 },
+  bubbleTextTheirs: { color: "#e4ecf5", fontSize: 16 },
+  bubbleTimeMine: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.65)",
+    textAlign: "right",
+    marginTop: 4,
+  },
+  bubbleTimeTheirs: {
+    fontSize: 11,
+    color: "#8eb4e0",
+    textAlign: "right",
+    marginTop: 4,
+  },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 8,
-    padding: 10,
-    paddingBottom: Platform.OS === "ios" ? 24 : 12,
-    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === "ios" ? 22 : 12,
+    backgroundColor: TG.header,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#ddd",
+    borderTopColor: "#1a2836",
   },
+  inputRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    backgroundColor: "#242f3d",
+    borderRadius: 24,
+    paddingLeft: 4,
+    paddingRight: 4,
+    minHeight: 48,
+    maxHeight: 120,
+  },
+  inlineIcon: {
+    width: 40,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inlineIconText: { fontSize: 18, opacity: 0.85 },
   input: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 48,
     maxHeight: 120,
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 16,
-    backgroundColor: "#fafafa",
-  },
-  sendBtn: {
-    backgroundColor: "#0a7ea4",
-    paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 20,
+    fontSize: 16,
+    color: TG.text,
   },
-  sendBtnPressed: { opacity: 0.85 },
-  sendBtnDisabled: { backgroundColor: "#9bbcc6" },
-  sendBtnText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  roundSend: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: TG.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
+  roundSendOff: { opacity: 0.45 },
+  roundSendPressed: { opacity: 0.88 },
+  roundSendGlyph: { color: "#fff", fontSize: 18 },
 });
