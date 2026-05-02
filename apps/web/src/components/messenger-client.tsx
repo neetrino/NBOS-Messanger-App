@@ -227,11 +227,11 @@ export function MessengerClient() {
         ) : null}
         <p className="text-center text-[13px]">
           <a className="text-[#6d9fd5] hover:underline" href="/register">
-            Ստեղծել հաշիվ
+            Create account
           </a>
           <span className="text-[#5c6370]"> · </span>
           <a className="text-[#6d9fd5] hover:underline" href="/login">
-            Մուտք
+            Sign in
           </a>
         </p>
       </div>

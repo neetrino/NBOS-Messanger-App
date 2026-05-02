@@ -19,6 +19,17 @@ body {
 }
 
 /* Telegram-style subtle chat wallpaper */
+@keyframes tg-menu-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .tg-chat-pattern {
   background-image: radial-gradient(
       circle at 12% 18%,

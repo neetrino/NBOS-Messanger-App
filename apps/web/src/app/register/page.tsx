@@ -38,11 +38,11 @@ export function RegisterPage() {
     e.preventDefault();
     setError(null);
     if (password !== confirm) {
-      setError("Գաղտնաբառերը չեն համընկնում։");
+      setError("Passwords do not match.");
       return;
     }
     if (password.length < 8) {
-      setError("Գաղտնաբառը պետք է լինի առնվազն 8 նիշ։");
+      setError("Password must be at least 8 characters.");
       return;
     }
     setBusy(true);
@@ -73,7 +73,7 @@ export function RegisterPage() {
       persistWebSession(data.accessToken, data.user);
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Սխալ է տեղի ունեցել։");
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setBusy(false);
     }
@@ -83,28 +83,28 @@ export function RegisterPage() {
     <main className="min-h-dvh flex flex-col items-center justify-center bg-[#0b121a] px-4 py-8">
       <div className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-[#0e1621] p-6 shadow-xl md:p-8">
         <h1 className="text-center text-xl font-semibold text-[#e4e6eb] md:text-2xl">
-          Ստեղծել հաշիվ
+          Create account
         </h1>
         <p className="mt-2 text-center text-sm text-[#8b92a0]">
-          Լրացրեք դաշտերը՝ նոր հաշիվ բացելու համար
+          Fill in the fields below to register
         </p>
 
         <form className="mt-8 flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium uppercase tracking-wide text-[#8b92a0]">
-              Անուն (ըստ ցանկության)
+              Name (optional)
             </span>
             <input
               className="rounded-xl border border-white/10 bg-[#242f3d] px-4 py-3 text-[15px] text-[#e4e6eb] outline-none ring-[#8774e1] placeholder:text-[#6b7280] focus:ring-2"
               autoComplete="name"
               value={name}
               onChange={(ev) => setName(ev.target.value)}
-              placeholder="Օր․՝ Անի"
+              placeholder="e.g. Jane"
             />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium uppercase tracking-wide text-[#8b92a0]">
-              Էլ․ փոստ
+              Email
             </span>
             <input
               className="rounded-xl border border-white/10 bg-[#242f3d] px-4 py-3 text-[15px] text-[#e4e6eb] outline-none ring-[#8774e1] placeholder:text-[#6b7280] focus:ring-2"
@@ -118,7 +118,7 @@ export function RegisterPage() {
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium uppercase tracking-wide text-[#8b92a0]">
-              Գաղտնաբառ
+              Password
             </span>
             <input
               className="rounded-xl border border-white/10 bg-[#242f3d] px-4 py-3 text-[15px] text-[#e4e6eb] outline-none ring-[#8774e1] placeholder:text-[#6b7280] focus:ring-2"
@@ -128,12 +128,12 @@ export function RegisterPage() {
               autoComplete="new-password"
               value={password}
               onChange={(ev) => setPassword(ev.target.value)}
-              placeholder="Առնվազն 8 նիշ"
+              placeholder="At least 8 characters"
             />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium uppercase tracking-wide text-[#8b92a0]">
-              Կրկնել գաղտնաբառը
+              Confirm password
             </span>
             <input
               className="rounded-xl border border-white/10 bg-[#242f3d] px-4 py-3 text-[15px] text-[#e4e6eb] outline-none ring-[#8774e1] placeholder:text-[#6b7280] focus:ring-2"
@@ -157,19 +157,19 @@ export function RegisterPage() {
             disabled={busy}
             className="mt-2 rounded-xl bg-[#8774e1] py-3.5 text-[15px] font-semibold text-white transition-opacity disabled:opacity-50"
           >
-            {busy ? "Սպասեք…" : "Գրանցվել"}
+            {busy ? "Please wait…" : "Create account"}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-[#8b92a0]">
-          Արդեն ունե՞ք հաշիվ։{" "}
+          Already have an account?{" "}
           <Link className="font-medium text-[#6d9fd5] hover:underline" href="/login">
-            Մուտք գործել
+            Sign in
           </Link>
         </p>
         <p className="mt-3 text-center text-sm text-[#8b92a0]">
           <Link className="text-[#6d9fd5] hover:underline" href="/">
-            ← Չաթ
+            ← Chat
           </Link>
         </p>
       </div>

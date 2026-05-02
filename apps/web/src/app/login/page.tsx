@@ -59,7 +59,7 @@ export function LoginPage() {
       persistWebSession(data.accessToken, data.user);
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Սխալ է տեղի ունեցել։");
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setBusy(false);
     }
@@ -69,16 +69,16 @@ export function LoginPage() {
     <main className="min-h-dvh flex flex-col items-center justify-center bg-[#0b121a] px-4 py-8">
       <div className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-[#0e1621] p-6 shadow-xl md:p-8">
         <h1 className="text-center text-xl font-semibold text-[#e4e6eb] md:text-2xl">
-          Մուտք գործել
+          Sign in
         </h1>
         <p className="mt-2 text-center text-sm text-[#8b92a0]">
-          Մուտքագրեք ձեր տվյալները
+          Enter your email and password
         </p>
 
         <form className="mt-8 flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium uppercase tracking-wide text-[#8b92a0]">
-              Էլ․ փոստ
+              Email
             </span>
             <input
               className="rounded-xl border border-white/10 bg-[#242f3d] px-4 py-3 text-[15px] text-[#e4e6eb] outline-none ring-[#8774e1] placeholder:text-[#6b7280] focus:ring-2"
@@ -91,7 +91,7 @@ export function LoginPage() {
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium uppercase tracking-wide text-[#8b92a0]">
-              Գաղտնաբառ
+              Password
             </span>
             <input
               className="rounded-xl border border-white/10 bg-[#242f3d] px-4 py-3 text-[15px] text-[#e4e6eb] outline-none ring-[#8774e1] placeholder:text-[#6b7280] focus:ring-2"
@@ -114,19 +114,19 @@ export function LoginPage() {
             disabled={busy}
             className="mt-2 rounded-xl bg-[#8774e1] py-3.5 text-[15px] font-semibold text-white transition-opacity disabled:opacity-50"
           >
-            {busy ? "Սպասեք…" : "Մուտք"}
+            {busy ? "Please wait…" : "Sign in"}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-[#8b92a0]">
-          Հաշիվ չունե՞ք։{" "}
+          Don&apos;t have an account?{" "}
           <Link className="font-medium text-[#6d9fd5] hover:underline" href="/register">
-            Գրանցվել
+            Sign up
           </Link>
         </p>
         <p className="mt-3 text-center text-sm text-[#8b92a0]">
           <Link className="text-[#6d9fd5] hover:underline" href="/">
-            ← Չաթ
+            ← Chat
           </Link>
         </p>
       </div>

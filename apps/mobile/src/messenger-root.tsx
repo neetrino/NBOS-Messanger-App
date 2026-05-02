@@ -6,9 +6,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -150,7 +150,10 @@ export function MessengerRoot() {
   const [socketReady, setSocketReady] = useState(false);
   const [stack, setStack] = useState<"list" | "chat">("list");
   const [listQuery, setListQuery] = useState("");
-  const [menuModalOpen, setMenuModalOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPanelMounted, setMenuPanelMounted] = useState(false);
+  const menuAnim = useRef(new Animated.Value(0)).current;
+  const [listChromeHeight, setListChromeHeight] = useState(0);
   const msgListRef = useRef<FlatList<ChatListRow>>(null);
   const socketRef = useRef<Socket | null>(null);
 
@@ -162,7 +165,9 @@ export function MessengerRoot() {
       socketRef.current = null;
     }
     setSocketReady(false);
-    setMenuModalOpen(false);
+    setMenuOpen(false);
+    setMenuPanelMounted(false);
+    menuAnim.setValue(0);
     setToken(null);
     setMe(null);
     setConversations([]);
@@ -175,6 +180,37 @@ export function MessengerRoot() {
     setActiveDemoIndex(0);
     setSessionMode("gate");
   }, []);
+
+  useEffect(() => {
+    if (menuOpen) {
+      setMenuPanelMounted(true);
+    }
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (menuOpen && menuPanelMounted) {
+      menuAnim.setValue(0);
+      Animated.timing(menuAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+    if (!menuOpen && menuPanelMounted) {
+      const handle = Animated.timing(menuAnim, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      });
+      handle.start(({ finished }) => {
+        if (finished) {
+          setMenuPanelMounted(false);
+        }
+      });
+      return () => handle.stop();
+    }
+  }, [menuOpen, menuPanelMounted, menuAnim]);
 
   const authHeaders = useCallback(
     (t: string) => ({
@@ -442,6 +478,7 @@ export function MessengerRoot() {
   }
 
   const openChat = (id: string) => {
+    setMenuOpen(false);
     setConversationId(id);
     setStack("chat");
   };
@@ -451,12 +488,13 @@ export function MessengerRoot() {
       <View style={styles.listToolbar} collapsable={false}>
         <View style={styles.toolbarSide}>
           <TouchableOpacity
-            onPress={() => setMenuModalOpen(true)}
+            onPress={() => setMenuOpen((v) => !v)}
             style={styles.iconBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             activeOpacity={0.65}
             accessibilityRole="button"
             accessibilityLabel="Open menu"
+            accessibilityState={{ expanded: menuOpen }}
           >
             <Text style={styles.iconBtnText}>☰</Text>
           </TouchableOpacity>
@@ -466,6 +504,44 @@ export function MessengerRoot() {
         </View>
         <View style={styles.toolbarSide} />
       </View>
+      {menuPanelMounted ? (
+        <Animated.View
+          style={[
+            styles.menuDropdownWrap,
+            {
+              opacity: menuAnim,
+              transform: [
+                {
+                  translateY: menuAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-6, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+          accessibilityRole="menu"
+          accessibilityLabel="Menu"
+          accessibilityElementsHidden={!menuOpen}
+          importantForAccessibility={menuOpen ? "yes" : "no-hide-descendants"}
+        >
+          <TouchableOpacity
+            onPress={() => {
+              setMenuOpen(false);
+              performLogout();
+            }}
+            style={styles.menuDropdownItem}
+            activeOpacity={0.7}
+            accessibilityRole="menuitem"
+            accessibilityLabel="Դուրս գալ"
+          >
+            <Text style={styles.menuDropdownItemIcon} importantForAccessibility="no">
+              🚪
+            </Text>
+            <Text style={styles.menuDropdownItemLabel}>Դուրս գալ</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      ) : null}
       <View style={styles.searchWrap}>
         <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
@@ -501,64 +577,21 @@ export function MessengerRoot() {
     </View>
   );
 
-  const meLabel = me ? displayName(me) : "";
-
   return (
     <>
-      <Modal
-        visible={menuModalOpen}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setMenuModalOpen(false)}
-      >
-        <View style={styles.menuModalRoot}>
-          <Pressable
-            style={[StyleSheet.absoluteFillObject, styles.menuModalBackdrop]}
-            onPress={() => setMenuModalOpen(false)}
-            accessibilityLabel="Close menu"
-          />
-          <View style={styles.menuModalCard}>
-            <Text style={styles.menuModalHeading}>Մենյու</Text>
-            <View style={styles.menuModalProfile}>
-              <View style={styles.menuModalAvatar}>
-                <Text style={styles.menuModalAvatarText}>
-                  {initialsFromLabel(meLabel || "?")}
-                </Text>
-              </View>
-              <View style={styles.menuModalProfileText}>
-                <Text style={styles.menuModalName} numberOfLines={1}>
-                  {meLabel || "—"}
-                </Text>
-                <Text style={styles.menuModalEmail} numberOfLines={2} selectable>
-                  {me?.email ?? ""}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.menuModalBadge}>
-              {sessionMode === "demo" ? "Դեմո ռեժիմ" : "Հաշիվ"}
-            </Text>
-            <View style={styles.menuModalDivider} />
-            <TouchableOpacity
-              onPress={performLogout}
-              style={styles.menuModalLogout}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel="Դուրս գալ"
-            >
-              <Text style={styles.menuModalLogoutText}>Դուրս գալ</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
       >
       {stack === "list" ? (
-        <View style={styles.flex}>
-          <View style={styles.listHeader}>{listHeader}</View>
+        <View style={[styles.flex, styles.listScreenHost]}>
+          <View
+            style={styles.listHeader}
+            onLayout={(e) => setListChromeHeight(e.nativeEvent.layout.height)}
+          >
+            {listHeader}
+          </View>
           {loadError ? <Text style={styles.errorBanner}>{loadError}</Text> : null}
           {convsLoading ? (
             <View style={styles.listLoading}>
@@ -609,6 +642,18 @@ export function MessengerRoot() {
               }}
             />
           )}
+          {(menuOpen || menuPanelMounted) && listChromeHeight > 0 ? (
+            <Pressable
+              style={[
+                StyleSheet.absoluteFillObject,
+                styles.menuOutsideDismiss,
+                { top: listChromeHeight },
+              ]}
+              onPress={() => setMenuOpen(false)}
+              accessibilityLabel="Close menu"
+              accessibilityRole="button"
+            />
+          ) : null}
         </View>
       ) : (
         <View style={styles.flex}>
@@ -756,10 +801,13 @@ const styles = StyleSheet.create({
     backgroundColor: TG.bg,
   },
   muted: { color: TG.muted, fontSize: 14 },
+  listScreenHost: {
+    position: "relative",
+  },
   listHeader: {
     backgroundColor: TG.sidebar,
-    zIndex: 2,
-    ...(Platform.OS === "android" ? { elevation: 6 } : {}),
+    zIndex: 6,
+    ...(Platform.OS === "android" ? { elevation: 8 } : {}),
   },
   listHeaderTop: { paddingHorizontal: 12, paddingBottom: 10 },
   listToolbar: {
@@ -892,83 +940,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerDots: { color: TG.muted, fontSize: 20 },
-  menuModalRoot: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 24,
-  },
-  menuModalBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.55)",
-  },
-  menuModalCard: {
-    width: "100%",
-    maxWidth: 340,
-    backgroundColor: TG.header,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2a3544",
-  },
-  menuModalHeading: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: TG.muted,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    marginBottom: 14,
-  },
-  menuModalProfile: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-  },
-  menuModalAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#6c8eef",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  menuModalAvatarText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  menuModalProfileText: { flex: 1, minWidth: 0 },
-  menuModalName: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: TG.text,
-  },
-  menuModalEmail: {
-    fontSize: 14,
-    color: TG.muted,
-    marginTop: 4,
-  },
-  menuModalBadge: {
-    marginTop: 14,
-    alignSelf: "flex-start",
-    fontSize: 12,
-    fontWeight: "600",
-    color: TG.accent,
-    backgroundColor: "rgba(135, 116, 225, 0.15)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  menuModalDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#2a3544",
-    marginTop: 18,
-    marginBottom: 6,
-  },
-  menuModalLogout: {
-    marginTop: 10,
-    backgroundColor: "#3d1f24",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  menuModalLogoutText: { color: "#ff8a8a", fontSize: 16, fontWeight: "700" },
   errorScroll: { maxHeight: "55%", width: "100%" },
   errorScrollContent: { paddingHorizontal: 8 },
   error: { color: "#ff8a8a", textAlign: "left" },
@@ -980,7 +951,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   listLoading: { flex: 1, justifyContent: "center", padding: 24 },
-  listFlex: { flex: 1, backgroundColor: TG.bg },
+  listFlex: { flex: 1, backgroundColor: TG.bg, zIndex: 0 },
+  menuOutsideDismiss: {
+    zIndex: 4,
+    backgroundColor: "transparent",
+    ...(Platform.OS === "android" ? { elevation: 5 } : {}),
+  },
+  menuDropdownWrap: {
+    alignSelf: "flex-start",
+    maxWidth: 280,
+    width: "100%",
+    marginTop: 4,
+    marginBottom: 4,
+    borderRadius: 10,
+    paddingVertical: 4,
+    backgroundColor: "#222d3b",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2f3f52",
+    overflow: "hidden",
+    ...(Platform.OS === "android" ? { elevation: 6 } : {}),
+  },
+  menuDropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  menuDropdownItemIcon: {
+    width: 36,
+    fontSize: 20,
+    textAlign: "center",
+    color: TG.muted,
+  },
+  menuDropdownItemLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#eb8686",
+  },
   listContent: { padding: 12, paddingBottom: 20 },
   daySep: { alignItems: "center", paddingVertical: 12 },
   dayPill: {
