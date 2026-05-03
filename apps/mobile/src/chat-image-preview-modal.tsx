@@ -39,52 +39,87 @@ function containedDisplaySize(
   return { w: Math.round(maxH * ratio), h: maxH };
 }
 
-function clampPanValues(
+/**
+ * Clamps outer pan (tx, ty) for transform: T(-p)*S*T(p)*T(t) on rect [0,vw]×[0,vh].
+ * Viewport = image container (vw, vh), not full screen — fixes vertical/horizontal bounds.
+ */
+function clampOuterPanForPivotZoom(
   tx: number,
   ty: number,
   s: number,
-  bw: number,
-  bh: number,
-  sw: number,
-  sh: number,
+  px: number,
+  py: number,
+  vw: number,
+  vh: number,
 ): { tx: number; ty: number } {
   "worklet";
   if (s <= 1) {
     return { tx: 0, ty: 0 };
   }
-  const margin = 40;
-  const scaledW = bw * s;
-  const scaledH = bh * s;
-  const maxX = Math.max(0, (scaledW - sw) / 2 + margin);
-  const maxY = Math.max(0, (scaledH - sh) / 2 + margin);
-  return {
-    tx: Math.min(Math.max(tx, -maxX), maxX),
-    ty: Math.min(Math.max(ty, -maxY), maxY),
-  };
+  const cornersX = [0, vw, 0, vw];
+  const cornersY = [0, 0, vh, vh];
+  let minX0 = Number.POSITIVE_INFINITY;
+  let maxX0 = Number.NEGATIVE_INFINITY;
+  let minY0 = Number.POSITIVE_INFINITY;
+  let maxY0 = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < 4; i += 1) {
+    const cx = cornersX[i];
+    const cy = cornersY[i];
+    const x0 = s * (cx - px) + px;
+    const y0 = s * (cy - py) + py;
+    if (x0 < minX0) {
+      minX0 = x0;
+    }
+    if (x0 > maxX0) {
+      maxX0 = x0;
+    }
+    if (y0 < minY0) {
+      minY0 = y0;
+    }
+    if (y0 > maxY0) {
+      maxY0 = y0;
+    }
+  }
+  const txLow = vw - maxX0;
+  const txHigh = -minX0;
+  let ctx = tx;
+  if (txLow <= txHigh) {
+    ctx = Math.min(Math.max(tx, txLow), txHigh);
+  } else {
+    ctx = vw * 0.5 - (minX0 + maxX0) * 0.5;
+  }
+  const tyLow = vh - maxY0;
+  const tyHigh = -minY0;
+  let cty = ty;
+  if (tyLow <= tyHigh) {
+    cty = Math.min(Math.max(ty, tyLow), tyHigh);
+  } else {
+    cty = vh * 0.5 - (minY0 + maxY0) * 0.5;
+  }
+  return { tx: ctx, ty: cty };
 }
 
 type ZoomableProps = {
   imageSource: ImageSourcePropType;
   baseW: number;
   baseH: number;
-  screenW: number;
-  screenH: number;
   onIntrinsicLoad: (iw: number, ih: number) => void;
 };
 
 function ZoomableImagePreview(props: ZoomableProps): ReactElement {
-  const { imageSource, baseW, baseH, screenW, screenH, onIntrinsicLoad } = props;
+  const { imageSource, baseW, baseH, onIntrinsicLoad } = props;
 
   const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
+  const pinchBaseScale = useSharedValue(1);
+  /** Pinch pivot in view coords; explicit T(-p)*S*T(p)*T(pan) avoids RN implicit scale origin. */
+  const pivotX = useSharedValue(0);
+  const pivotY = useSharedValue(0);
   const baseWSv = useSharedValue(baseW);
   const baseHSv = useSharedValue(baseH);
-  const screenWSv = useSharedValue(screenW);
-  const screenHSv = useSharedValue(screenH);
 
   useEffect(() => {
     baseWSv.value = baseW;
@@ -92,56 +127,91 @@ function ZoomableImagePreview(props: ZoomableProps): ReactElement {
   }, [baseW, baseH, baseHSv, baseWSv]);
 
   useEffect(() => {
-    screenWSv.value = screenW;
-    screenHSv.value = screenH;
-  }, [screenH, screenW, screenHSv, screenWSv]);
-
-  useEffect(() => {
     cancelAnimation(translateX);
     cancelAnimation(translateY);
     scale.value = MIN_SCALE;
-    savedScale.value = MIN_SCALE;
     translateX.value = 0;
     translateY.value = 0;
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
+    pinchBaseScale.value = MIN_SCALE;
+    pivotX.value = 0;
+    pivotY.value = 0;
   }, [baseW, baseH]);
 
   const gesture = useMemo(
     () =>
       Gesture.Simultaneous(
         Gesture.Pinch()
-          .onStart(() => {
-            savedScale.value = scale.value;
+          .onStart((e) => {
+            "worklet";
+            const s = scale.value;
+            pinchBaseScale.value = s;
+            const bw = baseWSv.value;
+            const bh = baseHSv.value;
+            const cx = bw * 0.5;
+            const cy = bh * 0.5;
+            const rawFx = e.focalX;
+            const rawFy = e.focalY;
+            const focalMissing =
+              !Number.isFinite(rawFx) ||
+              !Number.isFinite(rawFy) ||
+              (rawFx === 0 && rawFy === 0);
+            const fNewX = focalMissing ? cx : rawFx;
+            const fNewY = focalMissing ? cy : rawFy;
+            const fOldX = pivotX.value;
+            const fOldY = pivotY.value;
+            translateX.value += (1 - s) * fOldX + (s - 1) * fNewX;
+            translateY.value += (1 - s) * fOldY + (s - 1) * fNewY;
+            pivotX.value = fNewX;
+            pivotY.value = fNewY;
           })
           .onUpdate((e) => {
-            const next = savedScale.value * e.scale;
-            scale.value = Math.min(Math.max(next, MIN_SCALE), MAX_SCALE);
+            "worklet";
+            const s0 = pinchBaseScale.value;
+            let s1 = s0 * e.scale;
+            if (s1 < MIN_SCALE) {
+              s1 = MIN_SCALE;
+            }
+            if (s1 > MAX_SCALE) {
+              s1 = MAX_SCALE;
+            }
+            if (s1 <= MIN_SCALE) {
+              scale.value = MIN_SCALE;
+              translateX.value = 0;
+              translateY.value = 0;
+              pivotX.value = 0;
+              pivotY.value = 0;
+              return;
+            }
+            scale.value = s1;
           })
           .onEnd(() => {
+            "worklet";
             if (scale.value < MIN_SCALE) {
               scale.value = MIN_SCALE;
             }
             if (scale.value > MAX_SCALE) {
               scale.value = MAX_SCALE;
             }
-            savedScale.value = scale.value;
             if (scale.value <= MIN_SCALE) {
               scale.value = MIN_SCALE;
-              savedScale.value = MIN_SCALE;
               translateX.value = withSpring(0);
               translateY.value = withSpring(0);
+              pivotX.value = 0;
+              pivotY.value = 0;
               savedTranslateX.value = 0;
               savedTranslateY.value = 0;
             } else {
-              const c = clampPanValues(
+              pinchBaseScale.value = scale.value;
+              const c = clampOuterPanForPivotZoom(
                 translateX.value,
                 translateY.value,
                 scale.value,
+                pivotX.value,
+                pivotY.value,
                 baseWSv.value,
                 baseHSv.value,
-                screenWSv.value,
-                screenHSv.value,
               );
               translateX.value = c.tx;
               translateY.value = c.ty;
@@ -156,39 +226,43 @@ function ZoomableImagePreview(props: ZoomableProps): ReactElement {
             savedTranslateY.value = translateY.value;
           })
           .onUpdate((e) => {
+            "worklet";
             if (scale.value <= MIN_SCALE) {
               return;
             }
             const nextX = savedTranslateX.value + e.translationX;
             const nextY = savedTranslateY.value + e.translationY;
-            const c = clampPanValues(
+            const c = clampOuterPanForPivotZoom(
               nextX,
               nextY,
               scale.value,
+              pivotX.value,
+              pivotY.value,
               baseWSv.value,
               baseHSv.value,
-              screenWSv.value,
-              screenHSv.value,
             );
             translateX.value = c.tx;
             translateY.value = c.ty;
           })
           .onEnd(() => {
+            "worklet";
             if (scale.value <= MIN_SCALE) {
               translateX.value = withSpring(0);
               translateY.value = withSpring(0);
+              pivotX.value = 0;
+              pivotY.value = 0;
               savedTranslateX.value = 0;
               savedTranslateY.value = 0;
               return;
             }
-            const c = clampPanValues(
+            const c = clampOuterPanForPivotZoom(
               translateX.value,
               translateY.value,
               scale.value,
+              pivotX.value,
+              pivotY.value,
               baseWSv.value,
               baseHSv.value,
-              screenWSv.value,
-              screenHSv.value,
             );
             translateX.value = c.tx;
             translateY.value = c.ty;
@@ -201,9 +275,13 @@ function ZoomableImagePreview(props: ZoomableProps): ReactElement {
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
+      { translateX: -pivotX.value },
+      { translateY: -pivotY.value },
+      { scale: scale.value },
+      { translateX: pivotX.value },
+      { translateY: pivotY.value },
       { translateX: translateX.value },
       { translateY: translateY.value },
-      { scale: scale.value },
     ],
   }));
 
@@ -271,8 +349,6 @@ export function ChatImagePreviewModal(props: {
                   imageSource={imageSource}
                   baseW={displaySize.w}
                   baseH={displaySize.h}
-                  screenW={winW}
-                  screenH={winH}
                   onIntrinsicLoad={onIntrinsicLoad}
                 />
               ) : null}
