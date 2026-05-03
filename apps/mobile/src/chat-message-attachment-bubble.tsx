@@ -1,28 +1,18 @@
 import type { MessageAttachmentDto } from "@app-messenger/shared";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactElement,
-} from "react";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  ImageSourcePropType,
-  Modal,
   Pressable,
-  StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from "react-native";
 import { formatFileSize } from "./chat-attachment-mobile";
+import { ChatImagePreviewModal } from "./chat-image-preview-modal";
 
 type Props = {
   attachment: MessageAttachmentDto;
@@ -30,129 +20,6 @@ type Props = {
   token: string;
   mine: boolean;
 };
-
-const CLOSE_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 } as const;
-
-function containedDisplaySize(
-  intrinsicW: number,
-  intrinsicH: number,
-  maxW: number,
-  maxH: number,
-): { w: number; h: number } {
-  if (intrinsicW <= 0 || intrinsicH <= 0) {
-    return { w: maxW, h: maxH };
-  }
-  const ratio = intrinsicW / intrinsicH;
-  const boxRatio = maxW / maxH;
-  if (ratio >= boxRatio) {
-    return { w: maxW, h: Math.round(maxW / ratio) };
-  }
-  return { w: Math.round(maxH * ratio), h: maxH };
-}
-
-function ChatImagePreviewModal(props: {
-  visible: boolean;
-  onRequestClose: () => void;
-  imageSource: ImageSourcePropType;
-  winW: number;
-  winH: number;
-}): ReactElement {
-  const { visible, onRequestClose, imageSource, winW, winH } = props;
-  const topInset = (Constants.statusBarHeight ?? 0) + 8;
-  const maxW = winW;
-  const maxH = Math.round(winH * 0.92);
-  const [displaySize, setDisplaySize] = useState({ w: maxW, h: maxH });
-
-  useEffect(() => {
-    if (!visible) {
-      return;
-    }
-    setDisplaySize({ w: maxW, h: maxH });
-  }, [visible, maxW, maxH, imageSource]);
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onRequestClose}
-    >
-      <View style={styles.previewRoot}>
-        <Pressable
-          style={styles.previewBackdrop}
-          onPress={onRequestClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close preview"
-        />
-        <View style={styles.previewImageWrap} pointerEvents="box-none">
-          <View style={{ width: displaySize.w, height: displaySize.h }}>
-            <Image
-              source={imageSource}
-              style={StyleSheet.absoluteFillObject}
-              resizeMode="contain"
-              onLoad={(e) => {
-                const { width: iw, height: ih } = e.nativeEvent.source;
-                if (
-                  typeof iw === "number" &&
-                  typeof ih === "number" &&
-                  iw > 0 &&
-                  ih > 0
-                ) {
-                  setDisplaySize(containedDisplaySize(iw, ih, maxW, maxH));
-                }
-              }}
-            />
-          </View>
-        </View>
-        <Pressable
-          onPress={onRequestClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close image"
-          hitSlop={CLOSE_HIT_SLOP}
-          style={[styles.previewCloseBtn, { top: topInset }]}
-        >
-          <View style={styles.previewCloseInner}>
-            <Ionicons name="close" size={26} color="#ffffff" />
-          </View>
-        </Pressable>
-      </View>
-    </Modal>
-  );
-}
-
-const styles = StyleSheet.create({
-  previewRoot: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.92)",
-  },
-  previewBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-  },
-  previewImageWrap: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  previewCloseBtn: {
-    position: "absolute",
-    right: 12,
-    zIndex: 20,
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  previewCloseInner: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
 
 export function ChatMessageAttachmentBubble(props: Props): ReactElement {
   const { attachment: att, apiBase, token, mine } = props;

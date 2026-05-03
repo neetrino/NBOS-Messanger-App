@@ -3,12 +3,13 @@ const path = require("path");
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
-const sharedPackageRoot = path.resolve(workspaceRoot, "packages/shared");
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch only workspace source packages — not the repo root (avoids indexing root node_modules).
-config.watchFolders = [sharedPackageRoot];
+// pnpm hoists `react-native` (and nested `@react-native/*`) under the repo root. Metro must watch
+// those paths or bundling fails with "Failed to get the SHA-1" for files outside `watchFolders`.
+// `packages/shared` lives under `workspaceRoot`, so one root folder is enough.
+config.watchFolders = [workspaceRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, "node_modules"),
   path.resolve(workspaceRoot, "node_modules"),
