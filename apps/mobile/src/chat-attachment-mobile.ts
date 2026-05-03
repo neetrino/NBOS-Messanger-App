@@ -36,7 +36,9 @@ export function validatePickedAsset(params: {
   name: string;
   mimeType: string | null | undefined;
   size: number | null | undefined;
-}): { ok: true; kind: AttachmentKind } | { ok: false; message: string } {
+}):
+  | { ok: true; kind: AttachmentKind; mimeType: string }
+  | { ok: false; message: string } {
   const rawMime = params.mimeType?.split(";")[0]?.trim();
   const mime =
     rawMime && rawMime !== "application/octet-stream"
@@ -59,7 +61,7 @@ export function validatePickedAsset(params: {
     }
     return { ok: false, message: "Unsupported file type" };
   }
-  return { ok: true, kind: v.kind };
+  return { ok: true, kind: v.kind, mimeType: mime };
 }
 
 export function formatFileSize(bytes: number): string {

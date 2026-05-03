@@ -1,5 +1,4 @@
 import {
-  CHAT_DOCUMENT_PICKER_TYPES,
   EMOJI_QUICK_PICK,
   MESSAGE_DELETED_BODY,
   SocketEvents,
@@ -9,7 +8,7 @@ import {
   type MessageNewPayload,
   type MessageSendPayload,
 } from "@app-messenger/shared";
-import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -551,9 +550,22 @@ export function MessengerRoot() {
       return;
     }
     try {
-      const r = await DocumentPicker.getDocumentAsync({
-        type: [...CHAT_DOCUMENT_PICKER_TYPES],
-        copyToCacheDirectory: true,
+      const existing = await ImagePicker.getMediaLibraryPermissionsAsync();
+      const requested = existing.granted
+        ? existing
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!requested.granted) {
+        Alert.alert(
+          "Photo library access",
+          "To attach photos or videos from your gallery, allow photo library access in Settings.",
+        );
+        return;
+      }
+
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images", "videos"],
+        allowsEditing: false,
+        quality: 1,
       });
       if (r.canceled) {
         return;
@@ -562,10 +574,14 @@ export function MessengerRoot() {
       if (!a?.uri) {
         return;
       }
+      const baseName =
+        a.fileName?.trim() ||
+        a.uri.split("/").pop()?.split("?")[0]?.trim() ||
+        (a.type === "video" ? "video.mp4" : "image.jpg");
       const v = validatePickedAsset({
-        name: a.name ?? "file",
+        name: baseName,
         mimeType: a.mimeType,
-        size: typeof a.size === "number" ? a.size : null,
+        size: typeof a.fileSize === "number" ? a.fileSize : null,
       });
       if (!v.ok) {
         setAttachmentError(v.message);
@@ -574,9 +590,9 @@ export function MessengerRoot() {
       setAttachmentError(null);
       setPendingAttachment({
         uri: a.uri,
-        name: a.name ?? "file",
-        size: typeof a.size === "number" ? a.size : 0,
-        mimeType: a.mimeType ?? "application/octet-stream",
+        name: baseName,
+        size: typeof a.fileSize === "number" ? a.fileSize : 0,
+        mimeType: v.mimeType,
         kind: v.kind,
       });
     } catch {
@@ -1255,7 +1271,7 @@ export function MessengerRoot() {
                 onPress={() => void pickAttachment()}
                 disabled={!conversationId || composerSending}
                 accessibilityRole="button"
-                accessibilityLabel="Attach file"
+                accessibilityLabel="Attach from gallery"
               >
                 {({ pressed }) => (
                   <ClipBrandIcon
