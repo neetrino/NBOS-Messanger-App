@@ -5,6 +5,7 @@ import {
   DEMO_USERS,
   MESSAGE_DELETED_BODY,
   SocketEvents,
+  type MessageAttachmentDto,
   type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
   type MessageSendPayload,
@@ -14,7 +15,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "@/lib/api-base";
 import { clearWebSession, readWebSession } from "@/lib/session-storage";
-import { TelegramDesktopShell } from "@/components/telegram-desktop-shell";
+import {
+  TelegramDesktopShell,
+  type PendingLocalAttachment,
+} from "@/components/telegram-desktop-shell";
+import { validateBrowserFile } from "@/lib/chat-attachment-client";
 
 function formatApiError(status: number, bodyText: string): string {
   try {
@@ -80,6 +85,7 @@ type MessageRow = {
   body: string;
   createdAt: string;
   deletedForEveryone?: boolean;
+  attachment?: MessageAttachmentDto | null;
 };
 
 export function MessengerClient() {
@@ -94,12 +100,23 @@ export function MessengerClient() {
   const [activeDemoIndex, setActiveDemoIndex] = useState(0);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [draft, setDraft] = useState("");
+  const [pendingAttachment, setPendingAttachment] =
+    useState<PendingLocalAttachment | null>(null);
+  const [composerSending, setComposerSending] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [accountKind, setAccountKind] = useState<"demo" | "session">("demo");
 
   const authHeaders = useMemo(() => {
     if (!token) {
       return undefined;
+    }
+    return { Authorization: `Bearer ${token}` };
+  }, [token]);
+
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    if (!token) {
+      return {};
     }
     return { Authorization: `Bearer ${token}` };
   }, [token]);
@@ -233,6 +250,7 @@ export function MessengerClient() {
                 ...m,
                 body: MESSAGE_DELETED_BODY,
                 deletedForEveryone: true,
+                attachment: undefined,
               }
             : m,
         ),
@@ -244,6 +262,20 @@ export function MessengerClient() {
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
+
+  const clearPendingAttachment = useCallback(() => {
+    setPendingAttachment((p) => {
+      if (p?.previewUrl) {
+        URL.revokeObjectURL(p.previewUrl);
+      }
+      return null;
+    });
+  }, []);
+
+  useEffect(() => {
+    clearPendingAttachment();
+    setAttachmentError(null);
+  }, [activeConversationId, clearPendingAttachment]);
 
   useEffect(() => {
     if (!token || !activeConversationId) {
@@ -272,6 +304,7 @@ export function MessengerClient() {
             senderId: payload.senderId,
             body: payload.body,
             createdAt: payload.createdAt,
+            ...(payload.attachment ? { attachment: payload.attachment } : {}),
           },
         ];
       });
@@ -292,6 +325,7 @@ export function MessengerClient() {
                   body: payload.body,
                   createdAt: payload.createdAt,
                   deletedForEveryone: true,
+                  attachment: undefined,
                 }
               : m,
           ),
@@ -305,17 +339,94 @@ export function MessengerClient() {
     };
   }, [activeConversationId, apiBase, token]);
 
-  const sendMessage = useCallback(() => {
-    if (!socket?.connected || !activeConversationId || !draft.trim()) {
+  const onAttachmentFileChosen = useCallback((file: File) => {
+    setAttachmentError(null);
+    const v = validateBrowserFile(file);
+    if (!v.ok) {
+      setAttachmentError(v.message);
       return;
     }
-    const payload: MessageSendPayload = {
-      conversationId: activeConversationId,
-      body: draft.trim(),
-    };
-    socket.emit(SocketEvents.MESSAGE_SEND, payload);
-    setDraft("");
-  }, [activeConversationId, draft, socket]);
+    setPendingAttachment((prev) => {
+      if (prev?.previewUrl) {
+        URL.revokeObjectURL(prev.previewUrl);
+      }
+      const previewUrl =
+        v.kind === "image" || v.kind === "video"
+          ? URL.createObjectURL(file)
+          : null;
+      return {
+        file,
+        kind: v.kind,
+        previewUrl,
+        name: file.name,
+        size: file.size,
+      };
+    });
+  }, []);
+
+  const sendMessage = useCallback(async () => {
+    setError(null);
+    setAttachmentError(null);
+    const text = draft.trim();
+    if (!socket?.connected || !activeConversationId) {
+      return;
+    }
+    if (!text && !pendingAttachment) {
+      return;
+    }
+    if (composerSending) {
+      return;
+    }
+    if (!token) {
+      return;
+    }
+    setComposerSending(true);
+    try {
+      let uploaded: MessageAttachmentDto | undefined;
+      if (pendingAttachment?.file) {
+        const form = new FormData();
+        form.append("file", pendingAttachment.file);
+        const res = await fetch(
+          `${apiBase}/conversations/${encodeURIComponent(activeConversationId)}/attachments`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: form,
+          },
+        );
+        if (!res.ok) {
+          const hint =
+            res.status === 413
+              ? "File is too large"
+              : formatApiError(res.status, await res.text());
+          setAttachmentError(
+            hint.includes("too large") ? "File is too large" : "Upload failed. Please try again.",
+          );
+          return;
+        }
+        uploaded = (await res.json()) as MessageAttachmentDto;
+      }
+      const payload: MessageSendPayload = {
+        conversationId: activeConversationId,
+        body: text,
+        ...(uploaded ? { attachment: { fileId: uploaded.fileId } } : {}),
+      };
+      socket.emit(SocketEvents.MESSAGE_SEND, payload);
+      setDraft("");
+      clearPendingAttachment();
+    } finally {
+      setComposerSending(false);
+    }
+  }, [
+    activeConversationId,
+    apiBase,
+    clearPendingAttachment,
+    composerSending,
+    draft,
+    pendingAttachment,
+    socket,
+    token,
+  ]);
 
   if (!user) {
     return (
@@ -355,6 +466,13 @@ export function MessengerClient() {
         draft={draft}
         onDraftChange={setDraft}
         onSend={sendMessage}
+        pendingAttachment={pendingAttachment}
+        onPendingAttachmentClear={clearPendingAttachment}
+        onAttachmentFileChosen={onAttachmentFileChosen}
+        composerSending={composerSending}
+        attachmentError={attachmentError}
+        apiBase={apiBase}
+        getAuthHeaders={getAuthHeaders}
         socketConnected={Boolean(socket?.connected)}
         error={error}
         otherUserId={otherUserId}

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -22,18 +23,65 @@ export class MessagesService {
     senderId: string;
     conversationId: string;
     body: string;
+    attachmentFileId?: string;
   }): Promise<Message> {
     await this.conversations.assertMember(
       params.senderId,
       params.conversationId,
     );
-    return this.prisma.message.create({
-      data: {
-        conversationId: params.conversationId,
-        senderId: params.senderId,
-        body: params.body,
+    const trimmed = params.body.trim();
+    if (!params.attachmentFileId && trimmed.length === 0) {
+      throw new BadRequestException('Empty message');
+    }
+    if (!params.attachmentFileId) {
+      return this.prisma.message.create({
+        data: {
+          conversationId: params.conversationId,
+          senderId: params.senderId,
+          body: trimmed,
+        },
+      });
+    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        const file = await tx.chatFile.findFirst({
+          where: {
+            id: params.attachmentFileId,
+            conversationId: params.conversationId,
+            uploadedByUserId: params.senderId,
+            messageId: null,
+          },
+        });
+        if (!file) {
+          throw new BadRequestException('Invalid or expired attachment');
+        }
+        const attachment = {
+          fileId: file.id,
+          kind: file.kind,
+          originalName: file.originalName,
+          mimeType: file.mimeType,
+          size: file.sizeBytes,
+        };
+        const msg = await tx.message.create({
+          data: {
+            conversationId: params.conversationId,
+            senderId: params.senderId,
+            body: trimmed,
+            attachment,
+          },
+        });
+        await tx.chatFile.update({
+          where: { id: file.id },
+          data: { messageId: msg.id },
+        });
+        return msg;
       },
-    });
+      {
+        // Neon / pool cold start can exceed Prisma’s default 5s interactive tx limit.
+        maxWait: 15_000,
+        timeout: 30_000,
+      },
+    );
   }
 
   async deleteForMe(params: {

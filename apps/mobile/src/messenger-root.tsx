@@ -1,11 +1,15 @@
 import {
+  CHAT_DOCUMENT_PICKER_TYPES,
   EMOJI_QUICK_PICK,
   MESSAGE_DELETED_BODY,
   SocketEvents,
+  type AttachmentKind,
+  type MessageAttachmentDto,
   type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
   type MessageSendPayload,
 } from "@app-messenger/shared";
+import * as DocumentPicker from "expo-document-picker";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,6 +17,7 @@ import {
   Animated,
   Dimensions,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -31,6 +36,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { io, type Socket } from "socket.io-client";
 import { AuthGate } from "./auth-gate";
 import { getApiBaseUrl } from "./api-base";
+import { ChatMessageAttachmentBubble } from "./chat-message-attachment-bubble";
+import { formatFileSize, validatePickedAsset } from "./chat-attachment-mobile";
 import { DEMO_PASSWORD, DEMO_USERS } from "./demo-users";
 
 type Me = { id: string; email: string; name: string | null };
@@ -48,6 +55,15 @@ type MessageRow = {
   body: string;
   createdAt: string;
   deletedForEveryone?: boolean;
+  attachment?: MessageAttachmentDto | null;
+};
+
+type PendingMobileAttachment = {
+  uri: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  kind: AttachmentKind;
 };
 
 function displayName(user: MemberUser | Me): string {
@@ -159,6 +175,10 @@ export function MessengerRoot() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [draft, setDraft] = useState("");
+  const [pendingAttachment, setPendingAttachment] =
+    useState<PendingMobileAttachment | null>(null);
+  const [composerSending, setComposerSending] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [convsLoading, setConvsLoading] = useState(false);
@@ -202,6 +222,9 @@ export function MessengerRoot() {
     setConversationId(null);
     setMessages([]);
     setDraft("");
+    setPendingAttachment(null);
+    setComposerSending(false);
+    setAttachmentError(null);
     setListQuery("");
     setNewConvOpen(false);
     setOtherUserId("");
@@ -361,6 +384,7 @@ export function MessengerRoot() {
                 ...m,
                 body: MESSAGE_DELETED_BODY,
                 deletedForEveryone: true,
+                attachment: undefined,
               }
             : m,
         ),
@@ -475,6 +499,7 @@ export function MessengerRoot() {
           senderId: payload.senderId,
           body: payload.body,
           createdAt: payload.createdAt,
+          ...(payload.attachment ? { attachment: payload.attachment } : {}),
         };
         return [...prev, next];
       });
@@ -493,6 +518,7 @@ export function MessengerRoot() {
                 body: payload.body,
                 createdAt: payload.createdAt,
                 deletedForEveryone: true,
+                attachment: undefined,
               }
             : m,
         ),
@@ -514,18 +540,110 @@ export function MessengerRoot() {
     setDeleteActionMessage(null);
   }, [conversationId]);
 
-  const send = useCallback(() => {
-    const s = socketRef.current;
-    const body = draft.trim();
-    if (!socketReady || !s?.connected || !conversationId || !body) {
+  useEffect(() => {
+    setPendingAttachment(null);
+    setAttachmentError(null);
+  }, [conversationId]);
+
+  const pickAttachment = useCallback(async () => {
+    if (!conversationId || !token || composerSending) {
       return;
     }
-    stickToBottomRef.current = true;
-    const payload: MessageSendPayload = { conversationId, body };
-    s.emit(SocketEvents.MESSAGE_SEND, payload);
-    setDraft("");
-    setEmojiOpen(false);
-  }, [conversationId, draft, socketReady]);
+    try {
+      const r = await DocumentPicker.getDocumentAsync({
+        type: [...CHAT_DOCUMENT_PICKER_TYPES],
+        copyToCacheDirectory: true,
+      });
+      if (r.canceled) {
+        return;
+      }
+      const a = r.assets[0];
+      if (!a?.uri) {
+        return;
+      }
+      const v = validatePickedAsset({
+        name: a.name ?? "file",
+        mimeType: a.mimeType,
+        size: typeof a.size === "number" ? a.size : null,
+      });
+      if (!v.ok) {
+        setAttachmentError(v.message);
+        return;
+      }
+      setAttachmentError(null);
+      setPendingAttachment({
+        uri: a.uri,
+        name: a.name ?? "file",
+        size: typeof a.size === "number" ? a.size : 0,
+        mimeType: a.mimeType ?? "application/octet-stream",
+        kind: v.kind,
+      });
+    } catch {
+      setAttachmentError("Could not attach file");
+    }
+  }, [composerSending, conversationId, token]);
+
+  const send = useCallback(async () => {
+    const s = socketRef.current;
+    const body = draft.trim();
+    if (!socketReady || !s?.connected || !conversationId || !token) {
+      return;
+    }
+    if (!body && !pendingAttachment) {
+      return;
+    }
+    if (composerSending) {
+      return;
+    }
+    setComposerSending(true);
+    try {
+      let uploaded: MessageAttachmentDto | undefined;
+      if (pendingAttachment) {
+        const form = new FormData();
+        form.append(
+          "file",
+          {
+            uri: pendingAttachment.uri,
+            name: pendingAttachment.name,
+            type: pendingAttachment.mimeType,
+          } as unknown as Blob,
+        );
+        const res = await fetch(
+          `${apiBase}/conversations/${encodeURIComponent(conversationId)}/attachments`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: form,
+          },
+        );
+        if (!res.ok) {
+          setAttachmentError("Upload failed. Please try again.");
+          return;
+        }
+        uploaded = (await res.json()) as MessageAttachmentDto;
+      }
+      stickToBottomRef.current = true;
+      const payload: MessageSendPayload = {
+        conversationId,
+        body,
+        ...(uploaded ? { attachment: { fileId: uploaded.fileId } } : {}),
+      };
+      s.emit(SocketEvents.MESSAGE_SEND, payload);
+      setDraft("");
+      setPendingAttachment(null);
+      setEmojiOpen(false);
+    } finally {
+      setComposerSending(false);
+    }
+  }, [
+    apiBase,
+    composerSending,
+    conversationId,
+    draft,
+    pendingAttachment,
+    socketReady,
+    token,
+  ]);
 
   const insertEmoji = useCallback(
     (emoji: string) => {
@@ -1002,14 +1120,25 @@ export function MessengerRoot() {
                           mine ? styles.bubbleBgMine : styles.bubbleBgTheirs,
                         ]}
                       >
-                        <Text
-                          style={[
-                            mine ? styles.bubbleTextMine : styles.bubbleTextTheirs,
-                            isTombstone && styles.bubbleTextTombstone,
-                          ]}
-                        >
-                          {item.body}
-                        </Text>
+                        {item.attachment && !isTombstone && token ? (
+                          <ChatMessageAttachmentBubble
+                            attachment={item.attachment}
+                            apiBase={apiBase}
+                            token={token}
+                            mine={mine}
+                          />
+                        ) : null}
+                        {item.body.trim() || isTombstone ? (
+                          <Text
+                            style={[
+                              mine ? styles.bubbleTextMine : styles.bubbleTextTheirs,
+                              item.attachment && !isTombstone ? styles.bubbleTextAfterAttach : null,
+                              isTombstone && styles.bubbleTextTombstone,
+                            ]}
+                          >
+                            {item.body}
+                          </Text>
+                        ) : null}
                         <Text
                           style={
                             mine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs
@@ -1025,6 +1154,44 @@ export function MessengerRoot() {
             />
           )}
           <View style={styles.composer}>
+            {attachmentError ? (
+              <Text style={styles.attachmentErrorText}>{attachmentError}</Text>
+            ) : null}
+            {pendingAttachment ? (
+              <View style={styles.pendingAttachRow}>
+                {pendingAttachment.kind === "image" ? (
+                  <Image
+                    source={{ uri: pendingAttachment.uri }}
+                    style={styles.pendingAttachThumb}
+                  />
+                ) : pendingAttachment.kind === "video" ? (
+                  <View style={styles.pendingVideoThumb}>
+                    <Text style={styles.pendingVideoGlyph}>▶</Text>
+                  </View>
+                ) : (
+                  <View style={styles.pendingDocThumb}>
+                    <Text style={styles.pendingDocGlyph}>📄</Text>
+                  </View>
+                )}
+                <View style={styles.pendingAttachMeta}>
+                  <Text style={styles.pendingAttachName} numberOfLines={1}>
+                    {pendingAttachment.name}
+                  </Text>
+                  <Text style={styles.pendingAttachSize}>
+                    {formatFileSize(pendingAttachment.size)}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setPendingAttachment(null)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove attachment"
+                >
+                  <Text style={styles.pendingAttachRemove}>Remove</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            <View style={styles.composerRow}>
             <View style={styles.inputRow}>
               <Pressable
                 style={styles.inlineIcon}
@@ -1049,6 +1216,7 @@ export function MessengerRoot() {
                 style={[styles.input, { height: composerInputHeight }]}
                 placeholder="Message"
                 placeholderTextColor={TG.muted}
+                editable={!composerSending}
                 value={draft}
                 onChangeText={setDraft}
                 onSelectionChange={(e) => {
@@ -1074,33 +1242,50 @@ export function MessengerRoot() {
                     return;
                   }
                   ne.preventDefault?.();
-                  send();
+                  void send();
                 }}
                 multiline
                 blurOnSubmit={false}
                 maxLength={2000}
               />
-              <Pressable style={styles.inlineIcon} hitSlop={8}>
+              <Pressable
+                style={styles.inlineIcon}
+                hitSlop={8}
+                onPress={() => void pickAttachment()}
+                disabled={!conversationId || composerSending}
+                accessibilityRole="button"
+                accessibilityLabel="Attach file"
+              >
                 <Text style={styles.inlineIconText}>📎</Text>
               </Pressable>
             </View>
             <Pressable
               onPress={() => {
-                if (draft.trim()) {
-                  send();
+                if (draft.trim() || pendingAttachment) {
+                  void send();
                 }
               }}
-              disabled={!socketReady || !conversationId}
+              disabled={
+                !socketReady ||
+                !conversationId ||
+                composerSending ||
+                (!draft.trim() && !pendingAttachment)
+              }
               style={({ pressed }) => [
                 styles.roundSend,
                 (!socketReady || !conversationId) && styles.roundSendOff,
-                pressed && draft.trim() && styles.roundSendPressed,
+                pressed && (draft.trim() || pendingAttachment) && styles.roundSendPressed,
               ]}
             >
-              <Text style={styles.roundSendGlyph}>
-                {draft.trim() ? "➤" : "🎤"}
-              </Text>
+              {composerSending ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.roundSendGlyph}>
+                  {draft.trim() || pendingAttachment ? "➤" : "🎤"}
+                </Text>
+              )}
             </Pressable>
+            </View>
           </View>
         </View>
       )}
@@ -1508,6 +1693,47 @@ const styles = StyleSheet.create({
   bubbleTextMine: { color: "#fff", fontSize: 16 },
   bubbleTextTheirs: { color: "#e4ecf5", fontSize: 16 },
   bubbleTextTombstone: { fontStyle: "italic", opacity: 0.88 },
+  bubbleTextAfterAttach: { marginTop: 6 },
+  attachmentErrorText: {
+    color: "#ff8a8a",
+    fontSize: 12,
+    marginBottom: 6,
+    paddingHorizontal: 4,
+  },
+  pendingAttachRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: "#242f3d",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2a3544",
+  },
+  pendingAttachThumb: { width: 48, height: 48, borderRadius: 8 },
+  pendingVideoThumb: {
+    width: 56,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingVideoGlyph: { color: TG.text, fontSize: 14 },
+  pendingDocThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingDocGlyph: { fontSize: 22 },
+  pendingAttachMeta: { flex: 1, minWidth: 0 },
+  pendingAttachName: { color: TG.text, fontSize: 13 },
+  pendingAttachSize: { color: TG.muted, fontSize: 11, marginTop: 2 },
+  pendingAttachRemove: { color: "#ff8a8a", fontSize: 13 },
   deleteSheetRow: {
     paddingVertical: 14,
     paddingHorizontal: 12,
@@ -1543,15 +1769,18 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   composer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
+    flexDirection: "column",
     paddingHorizontal: 10,
     paddingTop: 8,
     paddingBottom: Platform.OS === "ios" ? 22 : 12,
     backgroundColor: TG.header,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "#1a2836",
+  },
+  composerRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
   },
   inputRow: {
     flex: 1,

@@ -23,8 +23,9 @@ model Conversation {
   title     String?
   createdAt DateTime @default(now())
 
-  members  ConversationMember[]
-  messages Message[]
+  members   ConversationMember[]
+  messages  Message[]
+  chatFiles ChatFile[]
 }
 
 model ConversationMember {
@@ -43,6 +44,8 @@ model Message {
   conversationId         String
   senderId               String
   body                   String
+  /// Denormalized attachment metadata (see ChatFile for authoritative file record)
+  attachment             Json?
   createdAt              DateTime  @default(now())
   /// User ids for whom this message is hidden (delete for me)
   hiddenForUserIds       String[]  @default([])
@@ -51,6 +54,26 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  linkedFile   ChatFile?
 
   @@index([conversationId, createdAt])
+}
+
+model ChatFile {
+  id                 String    @id @default(cuid())
+  conversationId   String
+  uploadedByUserId String
+  /// Filename within uploads/chat/
+  storageFileName  String
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  kind             String
+  createdAt        DateTime  @default(now())
+  messageId        String?   @unique
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      Message?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, uploadedByUserId])
 }

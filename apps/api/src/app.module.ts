@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { join } from 'node:path';
 import { AuthModule } from './auth/auth.module';
 import { ChatModule } from './chat/chat.module';
+import { ChatFilesModule } from './chat-files/chat-files.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { HealthController } from './health.controller';
 import { MessagesModule } from './messages/messages.module';
@@ -20,6 +21,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     ConversationsModule,
     MessagesModule,
+    ChatFilesModule,
     ChatModule,
   ],
   controllers: [HealthController],

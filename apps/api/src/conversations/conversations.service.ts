@@ -4,8 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MESSAGE_DELETED_BODY } from '@app-messenger/shared';
+import {
+  MESSAGE_DELETED_BODY,
+  type MessageAttachmentDto,
+} from '@app-messenger/shared';
 import type { Message } from '@prisma/client';
+import { parseStoredAttachment } from '../messages/attachment-json.util';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type ConversationMessageDto = {
@@ -15,6 +19,7 @@ export type ConversationMessageDto = {
   body: string;
   createdAt: string;
   deletedForEveryone?: boolean;
+  attachment?: MessageAttachmentDto | null;
 };
 
 @Injectable()
@@ -98,6 +103,11 @@ export class ConversationsService {
     };
     if (deletedForEveryone) {
       base.deletedForEveryone = true;
+      return base;
+    }
+    const att = parseStoredAttachment(m.attachment);
+    if (att) {
+      base.attachment = att;
     }
     return base;
   }

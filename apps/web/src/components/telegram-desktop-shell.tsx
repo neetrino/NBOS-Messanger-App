@@ -1,6 +1,11 @@
 "use client";
 
-import { MESSAGE_DELETED_BODY } from "@app-messenger/shared";
+import {
+  CHAT_ATTACHMENT_INPUT_ACCEPT,
+  MESSAGE_DELETED_BODY,
+  type AttachmentKind,
+  type MessageAttachmentDto,
+} from "@app-messenger/shared";
 import {
   useCallback,
   useEffect,
@@ -11,6 +16,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { ChatEmojiPickerPanel } from "@/components/chat-emoji-picker-panel";
+import { ChatMessageAttachment } from "@/components/chat-message-attachment";
+import { formatFileSize } from "@/lib/chat-attachment-client";
 
 const CHAT_SCROLL_BOTTOM_THRESHOLD_PX = 80;
 const COMPOSER_TEXTAREA_MIN_PX = 44;
@@ -43,6 +50,15 @@ type MessageRow = {
   body: string;
   createdAt: string;
   deletedForEveryone?: boolean;
+  attachment?: MessageAttachmentDto | null;
+};
+
+export type PendingLocalAttachment = {
+  file: File;
+  kind: AttachmentKind;
+  previewUrl: string | null;
+  name: string;
+  size: number;
 };
 
 export type TelegramDesktopShellProps = {
@@ -58,7 +74,14 @@ export type TelegramDesktopShellProps = {
   messages: MessageRow[];
   draft: string;
   onDraftChange: (value: string) => void;
-  onSend: () => void;
+  onSend: () => void | Promise<void>;
+  pendingAttachment: PendingLocalAttachment | null;
+  onPendingAttachmentClear: () => void;
+  onAttachmentFileChosen: (file: File) => void;
+  composerSending: boolean;
+  attachmentError: string | null;
+  apiBase: string;
+  getAuthHeaders: () => Record<string, string>;
   socketConnected: boolean;
   error: string | null;
   otherUserId: string;
@@ -148,6 +171,13 @@ export function TelegramDesktopShell({
   draft,
   onDraftChange,
   onSend,
+  pendingAttachment,
+  onPendingAttachmentClear,
+  onAttachmentFileChosen,
+  composerSending,
+  attachmentError,
+  apiBase,
+  getAuthHeaders,
   socketConnected,
   error,
   otherUserId,
@@ -172,6 +202,7 @@ export function TelegramDesktopShell({
   const skipMessageContextPointerDismissRef = useRef(false);
   const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
   const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
   const composerStripRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const userPinnedToBottomRef = useRef(true);
@@ -348,6 +379,54 @@ export function TelegramDesktopShell({
     setMessageContext(null);
   }, [activeConversationId]);
 
+  useLayoutEffect(() => {
+    if (!pendingAttachment || !activeConversationId) {
+      return;
+    }
+    const el = draftInputRef.current;
+    if (!el || composerSending) {
+      return;
+    }
+    el.focus();
+    window.setTimeout(() => {
+      draftInputRef.current?.focus();
+    }, 0);
+  }, [activeConversationId, composerSending, pendingAttachment]);
+
+  useEffect(() => {
+    if (!pendingAttachment || composerSending || !activeConversationId) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || e.shiftKey) {
+        return;
+      }
+      if (draftInputRef.current === document.activeElement) {
+        return;
+      }
+      const ae = document.activeElement;
+      const focusAllowsSend =
+        ae === document.body ||
+        ae === document.documentElement ||
+        ae === attachInputRef.current;
+      if (!focusAllowsSend) {
+        return;
+      }
+      e.preventDefault();
+      userPinnedToBottomRef.current = true;
+      void onSend();
+      setEmojiPickerOpen(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [
+    activeConversationId,
+    composerSending,
+    draft,
+    onSend,
+    pendingAttachment,
+  ]);
+
   useEffect(() => {
     if (isMdUp) {
       return;
@@ -388,13 +467,13 @@ export function TelegramDesktopShell({
   }, [messageContext]);
 
   const handleComposerSend = useCallback(() => {
-    if (!draft.trim()) {
+    if (!draft.trim() && !pendingAttachment) {
       return;
     }
     userPinnedToBottomRef.current = true;
-    onSend();
+    void onSend();
     setEmojiPickerOpen(false);
-  }, [draft, onSend]);
+  }, [draft, onSend, pendingAttachment]);
 
   const insertEmoji = useCallback(
     (emoji: string) => {
@@ -716,17 +795,32 @@ export function TelegramDesktopShell({
                             : "rounded-bl-md bg-[#2b5278] text-[#e4ecf5]"
                         }`}
                       >
-                        <p
-                          className={`whitespace-pre-wrap text-[15px] leading-snug ${
-                            row.m.deletedForEveryone || row.m.body === MESSAGE_DELETED_BODY
-                              ? row.m.senderId === userId
-                                ? "italic text-white/85"
-                                : "italic text-[#b8c9dc]"
-                              : ""
-                          }`}
-                        >
-                          {row.m.body}
-                        </p>
+                        {row.m.attachment &&
+                        !(row.m.deletedForEveryone || row.m.body === MESSAGE_DELETED_BODY) ? (
+                          <ChatMessageAttachment
+                            attachment={row.m.attachment}
+                            apiBase={apiBase}
+                            getAuthHeaders={getAuthHeaders}
+                            mine={row.m.senderId === userId}
+                          />
+                        ) : null}
+                        {row.m.body.trim() ||
+                        row.m.deletedForEveryone ||
+                        row.m.body === MESSAGE_DELETED_BODY ? (
+                          <p
+                            className={`whitespace-pre-wrap text-[15px] leading-snug ${
+                              row.m.attachment ? "mt-2 " : ""
+                            }${
+                              row.m.deletedForEveryone || row.m.body === MESSAGE_DELETED_BODY
+                                ? row.m.senderId === userId
+                                  ? "italic text-white/85"
+                                  : "italic text-[#b8c9dc]"
+                                : ""
+                            }`}
+                          >
+                            {row.m.body}
+                          </p>
+                        ) : null}
                         <p
                           className={`mt-1 text-right text-[11px] ${
                             row.m.senderId === userId ? "text-white/70" : "text-[#8eb4e0]"
@@ -746,6 +840,61 @@ export function TelegramDesktopShell({
             ref={composerStripRef}
             className="shrink-0 border-t border-[#1f2a3a] bg-[#17212b] px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
           >
+            {attachmentError ? (
+              <p className="mb-2 text-[12px] text-[#ff8a8a]">{attachmentError}</p>
+            ) : null}
+            {pendingAttachment ? (
+              <div className="mb-2 flex items-start gap-2 rounded-xl bg-[#242f3d] p-2 ring-1 ring-[#2a3544]">
+                {pendingAttachment.previewUrl && pendingAttachment.kind === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- local object URL preview
+                  <img
+                    src={pendingAttachment.previewUrl}
+                    alt=""
+                    className="h-14 w-14 shrink-0 rounded-lg object-cover"
+                  />
+                ) : pendingAttachment.previewUrl && pendingAttachment.kind === "video" ? (
+                  <video
+                    src={pendingAttachment.previewUrl}
+                    className="h-14 w-20 shrink-0 rounded-lg object-cover"
+                    muted
+                    playsInline
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-black/25 text-2xl">
+                    📄
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] text-[#e4e6eb]">{pendingAttachment.name}</p>
+                  <p className="text-[11px] text-[#8b92a0]">
+                    {formatFileSize(pendingAttachment.size)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg px-2 py-1 text-[12px] text-[#ff8a8a] hover:bg-white/[0.06]"
+                  onClick={onPendingAttachmentClear}
+                  aria-label="Remove attachment"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : null}
+            <input
+              ref={attachInputRef}
+              type="file"
+              className="sr-only"
+              accept={CHAT_ATTACHMENT_INPUT_ACCEPT}
+              aria-hidden
+              tabIndex={-1}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) {
+                  onAttachmentFileChosen(f);
+                }
+              }}
+            />
             <div className="flex items-end gap-2">
               <div
                 ref={emojiAnchorRef}
@@ -795,13 +944,15 @@ export function TelegramDesktopShell({
                     handleComposerSend();
                   }}
                   placeholder="Message"
-                  disabled={!activeConversationId}
+                  disabled={!activeConversationId || composerSending}
                   className="max-h-[168px] min-h-[44px] flex-1 resize-none bg-transparent py-2.5 pr-2 text-[15px] leading-snug text-[#e4e6eb] placeholder:text-[#6d7588] outline-none disabled:opacity-50"
                 />
                 <button
                   type="button"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center text-[#8b92a0] hover:text-[#8774e1]"
-                  aria-label="Attach"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center text-[#8b92a0] hover:text-[#8774e1] disabled:opacity-40"
+                  aria-label="Attach file"
+                  disabled={!activeConversationId || composerSending}
+                  onClick={() => attachInputRef.current?.click()}
                 >
                   📎
                 </button>
@@ -809,15 +960,25 @@ export function TelegramDesktopShell({
               <button
                 type="button"
                 onClick={() => {
-                  if (draft.trim()) {
+                  if (draft.trim() || pendingAttachment) {
                     handleComposerSend();
                   }
                 }}
-                disabled={!activeConversationId}
+                disabled={
+                  !activeConversationId ||
+                  composerSending ||
+                  (!draft.trim() && !pendingAttachment)
+                }
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#8774e1] text-lg text-white shadow-md hover:bg-[#7667d4] disabled:opacity-40"
-                aria-label={draft.trim() ? "Send" : "Voice message"}
+                aria-label={draft.trim() || pendingAttachment ? "Send" : "Voice message"}
               >
-                {draft.trim() ? "➤" : "🎤"}
+                {composerSending ? (
+                  <span className="text-xs">…</span>
+                ) : draft.trim() || pendingAttachment ? (
+                  "➤"
+                ) : (
+                  "🎤"
+                )}
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { UsePipes, ValidationPipe } from '@nestjs/common';
+import { WsException } from '@nestjs/websockets';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -13,6 +14,7 @@ import {
   type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
 } from '@app-messenger/shared';
+import { parseStoredAttachment } from '../messages/attachment-json.util';
 import type { Server, Socket } from 'socket.io';
 import { ConversationsService } from '../conversations/conversations.service';
 import { MessagesService } from '../messages/messages.service';
@@ -87,17 +89,26 @@ export class ChatGateway implements OnGatewayConnection {
     if (!userId) {
       return;
     }
+    const hasBody =
+      typeof body.body === 'string' && body.body.trim().length > 0;
+    const hasAtt = Boolean(body.attachment?.fileId?.trim());
+    if (!hasBody && !hasAtt) {
+      throw new WsException('Message must include text or an attachment');
+    }
     const saved = await this.messages.createInConversation({
       senderId: userId,
       conversationId: body.conversationId,
-      body: body.body,
+      body: String(body.body ?? '').trim(),
+      attachmentFileId: body.attachment?.fileId,
     });
+    const attachment = parseStoredAttachment(saved.attachment);
     const payload: MessageNewPayload = {
       id: saved.id,
       conversationId: saved.conversationId,
       senderId: saved.senderId,
       body: saved.body,
       createdAt: saved.createdAt.toISOString(),
+      ...(attachment ? { attachment } : {}),
     };
     this.server
       .to(roomName(saved.conversationId))
