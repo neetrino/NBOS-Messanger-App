@@ -4,7 +4,7 @@ import { MessengerRoot } from "./src/messenger-root";
 export default function App() {
   return (
     <>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       <MessengerRoot />
     </>
   );

@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  DEMO_PASSWORD,
+  DEMO_USERS,
   SocketEvents,
   type MessageNewPayload,
   type MessageSendPayload,
@@ -30,6 +32,29 @@ function formatApiError(status: number, bodyText: string): string {
   return trimmed.length > 0 ? trimmed : `Request failed (${status})`;
 }
 
+function isUnreachableNetworkError(message: string): boolean {
+  return (
+    message.includes("Failed to fetch") ||
+    message.includes("NetworkError") ||
+    message.includes("Network request failed") ||
+    message.includes("Load failed")
+  );
+}
+
+function formatDemoLoginError(e: unknown, apiBase: string): string {
+  const base = e instanceof Error ? e.message : "Login failed";
+  if (!isUnreachableNetworkError(base)) {
+    return base;
+  }
+  return [
+    base,
+    "",
+    `This browser cannot reach the API (${apiBase}).`,
+    "• Ensure the API is running (repo root: `pnpm dev` or `pnpm dev:api`)",
+    "• Set `NEXT_PUBLIC_API_URL` in apps/web/.env.local to the API origin",
+  ].join("\n");
+}
+
 type AuthUser = {
   id: string;
   email: string;
@@ -37,10 +62,14 @@ type AuthUser = {
   createdAt: string;
 };
 
-type Conversation = { id: string; title: string | null; createdAt: string };
+type MemberUser = { id: string; email: string; name: string | null };
 
-const DEMO_EMAIL = "alice@demo.local";
-const DEMO_PASSWORD = "demo1234";
+type Conversation = {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  members: Array<{ userId: string; user: MemberUser }>;
+};
 
 type MessageRow = {
   id: string;
@@ -59,6 +88,7 @@ export function MessengerClient() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [otherUserId, setOtherUserId] = useState("");
   const [activeConversationId, setActiveConversationId] = useState("");
+  const [activeDemoIndex, setActiveDemoIndex] = useState(0);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -73,22 +103,29 @@ export function MessengerClient() {
 
   const loginDemo = useCallback(async () => {
     setError(null);
-    const res = await fetch(`${apiBase}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: DEMO_EMAIL, password: DEMO_PASSWORD }),
-    });
-    if (!res.ok) {
-      setError(formatApiError(res.status, await res.text()));
-      return;
+    setToken(null);
+    setUser(null);
+    const email = DEMO_USERS[activeDemoIndex]?.email ?? DEMO_USERS[0].email;
+    try {
+      const res = await fetch(`${apiBase}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: DEMO_PASSWORD }),
+      });
+      if (!res.ok) {
+        setError(formatApiError(res.status, await res.text()));
+        return;
+      }
+      const data = (await res.json()) as {
+        accessToken: string;
+        user: AuthUser;
+      };
+      setToken(data.accessToken);
+      setUser(data.user);
+    } catch (e) {
+      setError(formatDemoLoginError(e, apiBase));
     }
-    const data = (await res.json()) as {
-      accessToken: string;
-      user: AuthUser;
-    };
-    setToken(data.accessToken);
-    setUser(data.user);
-  }, [apiBase]);
+  }, [activeDemoIndex, apiBase]);
 
   useEffect(() => {
     const stored = readWebSession();
@@ -99,8 +136,14 @@ export function MessengerClient() {
       return;
     }
     setAccountKind("demo");
+  }, []);
+
+  useEffect(() => {
+    if (accountKind !== "demo") {
+      return;
+    }
     void loginDemo();
-  }, [loginDemo]);
+  }, [accountKind, loginDemo]);
 
   const handleLogout = useCallback(() => {
     clearWebSession();
@@ -143,7 +186,9 @@ export function MessengerClient() {
       setError(formatApiError(res.status, await res.text()));
       return;
     }
+    const created = (await res.json()) as { id: string };
     await refreshConversations();
+    setActiveConversationId(created.id);
   }, [apiBase, authHeaders, otherUserId, refreshConversations]);
 
   const loadHistory = useCallback(async () => {
@@ -151,7 +196,7 @@ export function MessengerClient() {
       return;
     }
     const res = await fetch(
-      `${apiBase}/conversations/${activeConversationId}/messages`,
+      `${apiBase}/conversations/${activeConversationId}/messages?take=80`,
       { headers: authHeaders },
     );
     if (!res.ok) {
@@ -180,16 +225,21 @@ export function MessengerClient() {
       });
     });
     s.on(SocketEvents.MESSAGE_NEW, (payload: MessageNewPayload) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: payload.id,
-          conversationId: payload.conversationId,
-          senderId: payload.senderId,
-          body: payload.body,
-          createdAt: payload.createdAt,
-        },
-      ]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === payload.id)) {
+          return prev;
+        }
+        return [
+          ...prev,
+          {
+            id: payload.id,
+            conversationId: payload.conversationId,
+            senderId: payload.senderId,
+            body: payload.body,
+            createdAt: payload.createdAt,
+          },
+        ];
+      });
     });
     return () => {
       s.removeAllListeners();
@@ -213,7 +263,7 @@ export function MessengerClient() {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-16 text-[#8b92a0]">
-        <p className="text-[15px]">Signing in as demo user…</p>
+        <p className="text-[15px]">Signing in…</p>
         {error ? (
           <p className="max-w-md whitespace-pre-wrap text-center text-[13px] text-[#ff8a8a]">
             {error}
@@ -237,6 +287,9 @@ export function MessengerClient() {
       userEmail={user.email}
       userId={user.id}
       accountKind={accountKind}
+      demoPersonas={accountKind === "demo" ? DEMO_USERS : undefined}
+      activeDemoIndex={accountKind === "demo" ? activeDemoIndex : undefined}
+      onDemoIndexChange={accountKind === "demo" ? setActiveDemoIndex : undefined}
       conversations={conversations}
       activeConversationId={activeConversationId}
       onSelectConversation={setActiveConversationId}

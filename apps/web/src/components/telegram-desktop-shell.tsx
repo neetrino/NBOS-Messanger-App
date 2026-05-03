@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Conversation = { id: string; title: string | null; createdAt: string };
+type MemberUser = { id: string; email: string; name: string | null };
+
+type Conversation = {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  members: Array<{ userId: string; user: MemberUser }>;
+};
 
 type MessageRow = {
   id: string;
@@ -16,6 +23,9 @@ export type TelegramDesktopShellProps = {
   userEmail: string;
   userId: string;
   accountKind: "demo" | "session";
+  demoPersonas?: readonly { email: string; label: string }[];
+  activeDemoIndex?: number;
+  onDemoIndexChange?: (index: number) => void;
   conversations: Conversation[];
   activeConversationId: string;
   onSelectConversation: (id: string) => void;
@@ -31,8 +41,18 @@ export type TelegramDesktopShellProps = {
   onLogout: () => void;
 };
 
-function convLabel(c: Conversation): string {
-  return c.title?.trim() || c.id.slice(0, 8);
+function displayName(user: MemberUser): string {
+  return user.name?.trim() || user.email.split("@")[0] || user.email;
+}
+
+function conversationLabel(c: Conversation, meId: string): string {
+  if (c.title?.trim()) {
+    return c.title;
+  }
+  const others = c.members
+    .filter((m) => m.userId !== meId)
+    .map((m) => displayName(m.user));
+  return others.length ? others.join(", ") : "Chat";
 }
 
 function initials(label: string): string {
@@ -67,6 +87,9 @@ export function TelegramDesktopShell({
   userEmail,
   userId,
   accountKind,
+  demoPersonas,
+  activeDemoIndex,
+  onDemoIndexChange,
   conversations,
   activeConversationId,
   onSelectConversation,
@@ -91,11 +114,13 @@ export function TelegramDesktopShell({
     if (!q) {
       return conversations;
     }
-    return conversations.filter((c) => convLabel(c).toLowerCase().includes(q));
-  }, [conversations, search]);
+    return conversations.filter((c) =>
+      conversationLabel(c, userId).toLowerCase().includes(q),
+    );
+  }, [conversations, search, userId]);
 
   const active = conversations.find((c) => c.id === activeConversationId);
-  const headerTitle = active ? convLabel(active) : "Select a chat";
+  const headerTitle = active ? conversationLabel(active, userId) : "Select a chat";
 
   const rowsWithSeparators = useMemo(() => {
     type Row =
@@ -207,10 +232,36 @@ export function TelegramDesktopShell({
           ) : null}
         </div>
 
+        {demoPersonas && onDemoIndexChange && typeof activeDemoIndex === "number" ? (
+          <div className="flex flex-wrap gap-2 border-t border-[#1f2430] px-3 py-2">
+            {demoPersonas.map((u, i) => {
+              const on = i === activeDemoIndex;
+              return (
+                <button
+                  key={u.email}
+                  type="button"
+                  onClick={() => onDemoIndexChange(i)}
+                  className={`rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
+                    on
+                      ? "bg-[#8774e1] text-white"
+                      : "bg-[#242f3d] text-[#8b92a0] hover:bg-[#343a4a]"
+                  }`}
+                >
+                  {u.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
         <div className="flex-1 overflow-y-auto min-h-0">
           {filtered.map((c) => {
             const on = c.id === activeConversationId;
-            const label = convLabel(c);
+            const label = conversationLabel(c, userId);
+            const subtitle =
+              c.members.length > 1
+                ? `${c.members.length} members`
+                : "Message";
             return (
               <button
                 key={c.id}
@@ -232,7 +283,7 @@ export function TelegramDesktopShell({
                   <span
                     className={`block truncate text-[13px] ${on ? "text-white/80" : "text-[#8b92a0]"}`}
                   >
-                    Chat · {c.id.slice(0, 6)}…
+                    {subtitle}
                   </span>
                 </span>
                 <span className={`shrink-0 text-[12px] ${on ? "text-white/70" : "text-[#6d7588]"}`}>

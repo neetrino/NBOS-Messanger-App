@@ -11,12 +11,14 @@ import {
 } from "react-native";
 
 const TG = {
+  outer: "#0b121a",
   bg: "#0e1621",
   panel: "#242f3d",
   accent: "#8774e1",
   text: "#e4e6eb",
   muted: "#8b92a0",
   link: "#6d9fd5",
+  border: "rgba(255,255,255,0.1)",
 } as const;
 
 type Me = { id: string; email: string; name: string | null };
@@ -59,11 +61,11 @@ export function AuthGate({ apiBase, onJwtSession, onDemo }: AuthGateProps) {
   const submitRegister = async () => {
     setError(null);
     if (password !== confirm) {
-      setError("Գաղտնաբառերը չեն համընկնում։");
+      setError("Passwords do not match.");
       return;
     }
     if (password.length < 8) {
-      setError("Գաղտնաբառը՝ առնվազն 8 նիշ։");
+      setError("Password must be at least 8 characters.");
       return;
     }
     setBusy(true);
@@ -88,7 +90,7 @@ export function AuthGate({ apiBase, onJwtSession, onDemo }: AuthGateProps) {
       };
       onJwtSession(data.accessToken, data.user);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Սխալ");
+      setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setBusy(false);
     }
@@ -114,7 +116,7 @@ export function AuthGate({ apiBase, onJwtSession, onDemo }: AuthGateProps) {
       };
       onJwtSession(data.accessToken, data.user);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Սխալ");
+      setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setBusy(false);
     }
@@ -122,130 +124,134 @@ export function AuthGate({ apiBase, onJwtSession, onDemo }: AuthGateProps) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.root}
+      style={styles.outer}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>
-          {tab === "register" ? "Գրանցում" : "Մուտք"}
-        </Text>
-        <Text style={styles.sub}>Միացեք API-ին կամ փորձեք դեմո ռեժիմը</Text>
+        <View style={styles.card}>
+          <Text style={styles.title}>
+            {tab === "register" ? "Create account" : "Sign in"}
+          </Text>
+          <Text style={styles.sub}>
+            Connect to the API or try demo mode
+          </Text>
 
-        <View style={styles.tabs}>
-          <Pressable
-            onPress={() => {
-              setTab("register");
-              setError(null);
-            }}
-            style={[styles.tab, tab === "register" && styles.tabOn]}
-          >
-            <Text style={[styles.tabText, tab === "register" && styles.tabTextOn]}>
-              Հաշիվ
+          <View style={styles.tabs}>
+            <Pressable
+              onPress={() => {
+                setTab("register");
+                setError(null);
+              }}
+              style={[styles.tab, tab === "register" && styles.tabOn]}
+            >
+              <Text style={[styles.tabText, tab === "register" && styles.tabTextOn]}>
+                Sign up
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setTab("login");
+                setError(null);
+              }}
+              style={[styles.tab, tab === "login" && styles.tabOn]}
+            >
+              <Text style={[styles.tabText, tab === "login" && styles.tabTextOn]}>
+                Sign in
+              </Text>
+            </Pressable>
+          </View>
+
+          {tab === "register" ? (
+            <View style={styles.form}>
+              <Field
+                label="Name (optional)"
+                value={name}
+                onChangeText={setName}
+                placeholder="e.g. Jane"
+                autoCapitalize="words"
+              />
+              <Field
+                label="Email"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <Field
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                placeholder="At least 8 characters"
+                secureTextEntry
+              />
+              <Field
+                label="Confirm password"
+                value={confirm}
+                onChangeText={setConfirm}
+                secureTextEntry
+              />
+              <Pressable
+                onPress={() => void submitRegister()}
+                disabled={busy}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  busy && styles.primaryBtnOff,
+                  pressed && !busy && styles.primaryBtnPressed,
+                ]}
+              >
+                <Text style={styles.primaryBtnText}>
+                  {busy ? "Please wait…" : "Create account"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.form}>
+              <Field
+                label="Email"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <Field
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+              <Pressable
+                onPress={() => void submitLogin()}
+                disabled={busy}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  busy && styles.primaryBtnOff,
+                  pressed && !busy && styles.primaryBtnPressed,
+                ]}
+              >
+                <Text style={styles.primaryBtnText}>
+                  {busy ? "Please wait…" : "Sign in"}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {error ? (
+            <Text style={styles.error} selectable>
+              {error}
             </Text>
-          </Pressable>
+          ) : null}
+
           <Pressable
-            onPress={() => {
-              setTab("login");
-              setError(null);
-            }}
-            style={[styles.tab, tab === "login" && styles.tabOn]}
+            onPress={onDemo}
+            style={({ pressed }) => [styles.demoBtn, pressed && styles.demoBtnPressed]}
           >
-            <Text style={[styles.tabText, tab === "login" && styles.tabTextOn]}>
-              Մուտք
-            </Text>
+            <Text style={styles.demoBtnText}>Demo (Alice / Bob / Caro)</Text>
           </Pressable>
         </View>
-
-        {tab === "register" ? (
-          <View style={styles.form}>
-            <Field
-              label="Անուն (ըստ ցանկության)"
-              value={name}
-              onChangeText={setName}
-              placeholder="Օր․՝ Անի"
-              autoCapitalize="words"
-            />
-            <Field
-              label="Էլ․ փոստ"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <Field
-              label="Գաղտնաբառ"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Առնվազն 8 նիշ"
-              secureTextEntry
-            />
-            <Field
-              label="Կրկնել գաղտնաբառը"
-              value={confirm}
-              onChangeText={setConfirm}
-              secureTextEntry
-            />
-            <Pressable
-              onPress={() => void submitRegister()}
-              disabled={busy}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                busy && styles.primaryBtnOff,
-                pressed && !busy && styles.primaryBtnPressed,
-              ]}
-            >
-              <Text style={styles.primaryBtnText}>
-                {busy ? "Սպասեք…" : "Գրանցվել"}
-              </Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.form}>
-            <Field
-              label="Էլ․ փոստ"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <Field
-              label="Գաղտնաբառ"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
-            <Pressable
-              onPress={() => void submitLogin()}
-              disabled={busy}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                busy && styles.primaryBtnOff,
-                pressed && !busy && styles.primaryBtnPressed,
-              ]}
-            >
-              <Text style={styles.primaryBtnText}>
-                {busy ? "Սպասեք…" : "Մուտք"}
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        {error ? (
-          <Text style={styles.error} selectable>
-            {error}
-          </Text>
-        ) : null}
-
-        <Pressable
-          onPress={onDemo}
-          style={({ pressed }) => [styles.demoBtn, pressed && styles.demoBtnPressed]}
-        >
-          <Text style={styles.demoBtnText}>Դեմո (Alice / Bob)</Text>
-        </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -283,6 +289,8 @@ const fieldStyles = StyleSheet.create({
   input: {
     backgroundColor: TG.panel,
     borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: TG.border,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === "ios" ? 14 : 10,
     fontSize: 16,
@@ -291,11 +299,23 @@ const fieldStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: TG.bg },
+  outer: { flex: 1, backgroundColor: TG.outer },
   scroll: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 32,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
+    backgroundColor: TG.bg,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: TG.border,
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === "ios" ? 56 : 32,
-    paddingBottom: 32,
+    paddingVertical: 24,
     gap: 16,
   },
   title: {

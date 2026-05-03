@@ -24,7 +24,7 @@ function formatApiError(status: number, bodyText: string): string {
   return trimmed.length > 0 ? trimmed : `Request failed (${status})`;
 }
 
-export function LoginPage() {
+function LoginPage() {
   const apiBase = useMemo(() => getApiBaseUrl(), []);
   const router = useRouter();
   const [email, setEmail] = useState("");

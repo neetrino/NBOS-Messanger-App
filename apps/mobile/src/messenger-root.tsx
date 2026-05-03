@@ -9,6 +9,7 @@ import {
   Animated,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -29,6 +30,7 @@ type MemberUser = { id: string; email: string; name: string | null };
 type ConversationRow = {
   id: string;
   title: string | null;
+  createdAt: string;
   members: Array<{ userId: string; user: MemberUser }>;
 };
 type MessageRow = {
@@ -68,11 +70,11 @@ function formatBootLoginError(e: unknown, apiBase: string): string {
   return [
     base,
     "",
-    `Հեռախոսը չի հասնում API-ին (${apiBase})։`,
-    "• PC-ն և հեռախոսը նույն Wi‑Fi ցանցում արա",
-    "• repository root `.env` — EXPO_PUBLIC_API_URL=http://<PC_WiFi_IP>:4000",
-    "  (Windows՝ ipconfig → Wireless LAN IPv4)",
-    "• Կամ repo/apps/mobile-ում՝ pnpm dev:tunnel",
+    `This device cannot reach the API (${apiBase}).`,
+    "• Put your PC and phone on the same Wi‑Fi network",
+    "• In the repo root `.env`, set EXPO_PUBLIC_API_URL=http://<PC_LAN_IP>:4000",
+    "  (Windows: ipconfig → Wireless LAN adapter IPv4 address)",
+    "• Or from apps/mobile run: pnpm dev:tunnel",
   ].join("\n");
 }
 
@@ -125,11 +127,12 @@ function messageRowsWithSeparators(messages: MessageRow[]): ChatListRow[] {
 const TG = {
   bg: "#0e1621",
   sidebar: "#292f3f",
-  header: "#212d3b",
+  header: "#17212b",
   accent: "#8774e1",
   bubbleIn: "#2b5278",
   text: "#e4e6eb",
   muted: "#8b92a0",
+  link: "#6d9fd5",
 } as const;
 
 type SessionMode = "gate" | "demo" | "jwt";
@@ -150,6 +153,9 @@ export function MessengerRoot() {
   const [socketReady, setSocketReady] = useState(false);
   const [stack, setStack] = useState<"list" | "chat">("list");
   const [listQuery, setListQuery] = useState("");
+  const [newConvOpen, setNewConvOpen] = useState(false);
+  const [otherUserId, setOtherUserId] = useState("");
+  const [createConvBusy, setCreateConvBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPanelMounted, setMenuPanelMounted] = useState(false);
   const menuAnim = useRef(new Animated.Value(0)).current;
@@ -175,6 +181,8 @@ export function MessengerRoot() {
     setMessages([]);
     setDraft("");
     setListQuery("");
+    setNewConvOpen(false);
+    setOtherUserId("");
     setLoadError(null);
     setStack("list");
     setActiveDemoIndex(0);
@@ -261,6 +269,35 @@ export function MessengerRoot() {
     },
     [apiBase, authHeaders],
   );
+
+  const createConversation = useCallback(async () => {
+    if (!token || !otherUserId.trim()) {
+      return;
+    }
+    setCreateConvBusy(true);
+    setLoadError(null);
+    try {
+      const res = await fetch(`${apiBase}/conversations`, {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify({ memberIds: [otherUserId.trim()] }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+      const created = JSON.parse(text) as { id: string };
+      await loadConversations(token);
+      setNewConvOpen(false);
+      setOtherUserId("");
+      setConversationId(created.id);
+      setStack("chat");
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setCreateConvBusy(false);
+    }
+  }, [apiBase, authHeaders, loadConversations, otherUserId, token]);
 
   const loadMessages = useCallback(
     async (t: string, convId: string) => {
@@ -451,7 +488,7 @@ export function MessengerRoot() {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={TG.accent} />
-        <Text style={styles.muted}>Բացում…</Text>
+        <Text style={styles.muted}>Signing in…</Text>
       </View>
     );
   }
@@ -470,7 +507,7 @@ export function MessengerRoot() {
         </ScrollView>
         {showSeedHint ? (
           <Text style={styles.muted}>
-            Ավելացրու seed՝ `pnpm db:seed` (repo root)
+            Add seed data: run `pnpm db:seed` (repo root)
           </Text>
         ) : null}
       </View>
@@ -533,12 +570,12 @@ export function MessengerRoot() {
             style={styles.menuDropdownItem}
             activeOpacity={0.7}
             accessibilityRole="menuitem"
-            accessibilityLabel="Դուրս գալ"
+            accessibilityLabel="Log out"
           >
             <Text style={styles.menuDropdownItemIcon} importantForAccessibility="no">
               🚪
             </Text>
-            <Text style={styles.menuDropdownItemLabel}>Դուրս գալ</Text>
+            <Text style={styles.menuDropdownItemLabel}>Log out</Text>
           </TouchableOpacity>
         </Animated.View>
       ) : null}
@@ -571,7 +608,7 @@ export function MessengerRoot() {
         </View>
       ) : (
         <Text style={styles.sessionHint} numberOfLines={1}>
-          {me?.email ?? ""}
+          Signed in as {me?.email ?? ""}
         </Text>
       )}
     </View>
@@ -579,6 +616,51 @@ export function MessengerRoot() {
 
   return (
     <>
+      <Modal
+        visible={newConvOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNewConvOpen(false)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => setNewConvOpen(false)}
+          />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>New conversation</Text>
+            <TextInput
+              value={otherUserId}
+              onChangeText={setOtherUserId}
+              placeholder="Other user id"
+              placeholderTextColor={TG.muted}
+              autoCapitalize="none"
+              style={styles.modalInput}
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setNewConvOpen(false)}
+                style={({ pressed }) => [styles.modalBtnGhost, pressed && styles.modalBtnPressed]}
+              >
+                <Text style={styles.modalBtnGhostText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void createConversation()}
+                disabled={createConvBusy || !otherUserId.trim()}
+                style={({ pressed }) => [
+                  styles.modalBtnPrimary,
+                  (createConvBusy || !otherUserId.trim()) && styles.modalBtnPrimaryOff,
+                  pressed && !(createConvBusy || !otherUserId.trim()) && styles.modalBtnPressed,
+                ]}
+              >
+                <Text style={styles.modalBtnPrimaryText}>
+                  {createConvBusy ? "Please wait…" : "Create"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -600,7 +682,7 @@ export function MessengerRoot() {
           ) : filteredConversations.length === 0 ? (
             <View style={styles.listLoading}>
               <Text style={styles.muted}>
-                Զրուցարան չկա։ Գործարկիր `pnpm db:seed`
+                No chats yet. Run `pnpm db:seed` at the repo root.
               </Text>
             </View>
           ) : (
@@ -611,6 +693,7 @@ export function MessengerRoot() {
               contentContainerStyle={styles.convListContent}
               renderItem={({ item: c }) => {
                 const label = conversationLabel(c, me?.id);
+                const selected = c.id === conversationId;
                 const subtitle =
                   c.members.length > 1
                     ? `${c.members.length} members`
@@ -620,28 +703,52 @@ export function MessengerRoot() {
                     onPress={() => openChat(c.id)}
                     style={({ pressed }) => [
                       styles.convRow,
-                      pressed && styles.convRowPressed,
+                      selected && styles.convRowSelected,
+                      !selected && pressed && styles.convRowPressed,
+                      selected && pressed && styles.convRowSelectedPressed,
                     ]}
                   >
-                    <View style={styles.convAvatar}>
+                    <View
+                      style={[styles.convAvatar, selected && styles.convAvatarSelected]}
+                    >
                       <Text style={styles.convAvatarText}>
                         {initialsFromLabel(label)}
                       </Text>
                     </View>
                     <View style={styles.convMid}>
-                      <Text style={styles.convName} numberOfLines={1}>
+                      <Text
+                        style={[styles.convName, selected && styles.convNameSelected]}
+                        numberOfLines={1}
+                      >
                         {label}
                       </Text>
-                      <Text style={styles.convPreview} numberOfLines={1}>
+                      <Text
+                        style={[styles.convPreview, selected && styles.convPreviewSelected]}
+                        numberOfLines={1}
+                      >
                         {subtitle}
                       </Text>
                     </View>
-                    <Text style={styles.convTime}> </Text>
+                    <Text
+                      style={[styles.convTime, selected && styles.convTimeSelected]}
+                    >
+                      {formatMsgTime(c.createdAt)}
+                    </Text>
                   </Pressable>
                 );
               }}
             />
           )}
+          {token ? (
+            <Pressable
+              onPress={() => setNewConvOpen(true)}
+              style={styles.newConvFab}
+              accessibilityRole="button"
+              accessibilityLabel="New conversation"
+            >
+              <Text style={styles.newConvFabText}>✎</Text>
+            </Pressable>
+          ) : null}
           {(menuOpen || menuPanelMounted) && listChromeHeight > 0 ? (
             <Pressable
               style={[
@@ -685,7 +792,7 @@ export function MessengerRoot() {
           {loadError ? <Text style={styles.errorBanner}>{loadError}</Text> : null}
           {!conversationId ? (
             <View style={styles.listLoading}>
-              <Text style={styles.muted}>No chat</Text>
+              <Text style={styles.muted}>Pick a conversation from the list</Text>
             </View>
           ) : (
             <FlatList
@@ -888,7 +995,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#1f2430",
   },
+  convRowSelected: { backgroundColor: TG.accent },
   convRowPressed: { backgroundColor: "#343a4a" },
+  convRowSelectedPressed: { opacity: 0.92 },
   convAvatar: {
     width: 52,
     height: 52,
@@ -898,11 +1007,71 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 12,
   },
+  convAvatarSelected: { backgroundColor: "rgba(255,255,255,0.2)" },
   convAvatarText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   convMid: { flex: 1, minWidth: 0 },
   convName: { fontSize: 16, fontWeight: "600", color: TG.text },
+  convNameSelected: { color: "#fff" },
   convPreview: { fontSize: 14, color: TG.muted, marginTop: 2 },
-  convTime: { width: 8, color: TG.muted, fontSize: 12 },
+  convPreviewSelected: { color: "rgba(255,255,255,0.8)" },
+  convTime: { minWidth: 52, color: TG.muted, fontSize: 12, textAlign: "right" },
+  convTimeSelected: { color: "rgba(255,255,255,0.7)" },
+  newConvFab: {
+    position: "absolute",
+    right: 16,
+    bottom: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: TG.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 8,
+    ...(Platform.OS === "android" ? { elevation: 10 } : {}),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+  },
+  newConvFabText: { color: "#fff", fontSize: 22 },
+  modalRoot: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  modalCard: {
+    zIndex: 2,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+    backgroundColor: "#242f3d",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(135,116,225,0.35)",
+  },
+  modalTitle: { fontSize: 12, fontWeight: "600", color: TG.muted, textTransform: "uppercase" },
+  modalInput: {
+    borderRadius: 8,
+    backgroundColor: "#1a2332",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#3a4555",
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 12 : 10,
+    fontSize: 15,
+    color: TG.text,
+  },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 4 },
+  modalBtnGhost: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  modalBtnGhostText: { color: TG.link, fontSize: 15, fontWeight: "600" },
+  modalBtnPrimary: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    backgroundColor: TG.accent,
+  },
+  modalBtnPrimaryOff: { opacity: 0.45 },
+  modalBtnPrimaryText: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  modalBtnPressed: { opacity: 0.88 },
   chatHeader: {
     flexDirection: "row",
     alignItems: "center",
