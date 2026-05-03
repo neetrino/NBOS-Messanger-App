@@ -5,6 +5,7 @@ import {
   type MessageNewPayload,
   type MessageSendPayload,
 } from "@app-messenger/shared";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "@/lib/api-base";
@@ -50,6 +51,7 @@ type MessageRow = {
 };
 
 export function MessengerClient() {
+  const router = useRouter();
   const apiBase = useMemo(() => getApiBaseUrl(), []);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -102,16 +104,8 @@ export function MessengerClient() {
 
   const handleLogout = useCallback(() => {
     clearWebSession();
-    setToken(null);
-    setUser(null);
-    setConversations([]);
-    setActiveConversationId("");
-    setMessages([]);
-    setDraft("");
-    setError(null);
-    setAccountKind("demo");
-    void loginDemo();
-  }, [loginDemo]);
+    router.replace("/login");
+  }, [router]);
 
   const refreshConversations = useCallback(async () => {
     if (!authHeaders) {
