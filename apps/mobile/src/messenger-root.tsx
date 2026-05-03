@@ -21,6 +21,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { io, type Socket } from "socket.io-client";
 import { AuthGate } from "./auth-gate";
@@ -137,6 +139,9 @@ const TG = {
   link: "#6d9fd5",
 } as const;
 
+const CHAT_SCROLL_BOTTOM_THRESHOLD = 80;
+const COMPOSER_INPUT_MAX_HEIGHT = 168;
+
 type SessionMode = "gate" | "demo" | "jwt";
 
 export function MessengerRoot() {
@@ -160,10 +165,12 @@ export function MessengerRoot() {
   const [createConvBusy, setCreateConvBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [composerInputHeight, setComposerInputHeight] = useState(48);
   const [menuPanelMounted, setMenuPanelMounted] = useState(false);
   const menuAnim = useRef(new Animated.Value(0)).current;
   const [listChromeHeight, setListChromeHeight] = useState(0);
   const msgListRef = useRef<FlatList<ChatListRow>>(null);
+  const stickToBottomRef = useRef(true);
   const socketRef = useRef<Socket | null>(null);
   const draftInputRef = useRef<TextInput>(null);
   const draftSelectionRef = useRef({ start: 0, end: 0 });
@@ -447,6 +454,7 @@ export function MessengerRoot() {
     if (!socketReady || !s?.connected || !conversationId || !body) {
       return;
     }
+    stickToBottomRef.current = true;
     const payload: MessageSendPayload = { conversationId, body };
     s.emit(SocketEvents.MESSAGE_SEND, payload);
     setDraft("");
@@ -507,6 +515,49 @@ export function MessengerRoot() {
   }, [conversations, listQuery, me?.id]);
 
   const chatRows = useMemo(() => messageRowsWithSeparators(messages), [messages]);
+
+  const handleMessageListScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      const range = contentSize.height - layoutMeasurement.height;
+      if (range <= 0) {
+        stickToBottomRef.current = true;
+        return;
+      }
+      const distFromBottom = range - contentOffset.y;
+      stickToBottomRef.current = distFromBottom < CHAT_SCROLL_BOTTOM_THRESHOLD;
+    },
+    [],
+  );
+
+  const scrollChatToEndIfPinned = useCallback((animated: boolean) => {
+    if (stickToBottomRef.current) {
+      msgListRef.current?.scrollToEnd({ animated });
+    }
+  }, []);
+
+  useEffect(() => {
+    stickToBottomRef.current = true;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+    const id = requestAnimationFrame(() => scrollChatToEndIfPinned(false));
+    return () => cancelAnimationFrame(id);
+  }, [
+    conversationId,
+    messages.length,
+    messages[messages.length - 1]?.id,
+    scrollChatToEndIfPinned,
+  ]);
+
+  useEffect(() => {
+    if (draft === "") {
+      setComposerInputHeight(48);
+    }
+  }, [draft]);
 
   const topInset =
     Platform.OS === "ios" ? 52 : (StatusBar.currentHeight ?? 0) + 8;
@@ -846,9 +897,9 @@ export function MessengerRoot() {
               data={chatRows}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.listContent}
-              onContentSizeChange={() =>
-                msgListRef.current?.scrollToEnd({ animated: true })
-              }
+              scrollEventThrottle={16}
+              onScroll={handleMessageListScroll}
+              onContentSizeChange={() => scrollChatToEndIfPinned(false)}
               renderItem={({ item: row }) => {
                 if (row.kind === "sep") {
                   return (
@@ -906,13 +957,14 @@ export function MessengerRoot() {
                 hitSlop={8}
                 onPress={() => setEmojiOpen((v) => !v)}
                 accessibilityRole="button"
-                accessibilityLabel="Emoji"
+                accessibilityLabel="Open emoji picker"
+                accessibilityState={{ expanded: emojiOpen }}
               >
                 <Text style={styles.inlineIconText}>🙂</Text>
               </Pressable>
               <TextInput
                 ref={draftInputRef}
-                style={styles.input}
+                style={[styles.input, { height: composerInputHeight }]}
                 placeholder="Message"
                 placeholderTextColor={TG.muted}
                 value={draft}
@@ -920,7 +972,30 @@ export function MessengerRoot() {
                 onSelectionChange={(e) => {
                   draftSelectionRef.current = e.nativeEvent.selection;
                 }}
+                onContentSizeChange={(e) => {
+                  const h = e.nativeEvent.contentSize.height;
+                  const next = Math.min(
+                    Math.max(48, h),
+                    COMPOSER_INPUT_MAX_HEIGHT,
+                  );
+                  setComposerInputHeight(next);
+                }}
+                onKeyPress={(e) => {
+                  if (e.nativeEvent.key !== "Enter") {
+                    return;
+                  }
+                  const ne = e.nativeEvent as {
+                    shiftKey?: boolean;
+                    preventDefault?: () => void;
+                  };
+                  if (ne.shiftKey) {
+                    return;
+                  }
+                  ne.preventDefault?.();
+                  send();
+                }}
                 multiline
+                blurOnSubmit={false}
                 maxLength={2000}
               />
               <Pressable style={styles.inlineIcon} hitSlop={8}>
@@ -1307,7 +1382,7 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
     paddingRight: 4,
     minHeight: 48,
-    maxHeight: 120,
+    maxHeight: COMPOSER_INPUT_MAX_HEIGHT + 12,
   },
   inlineIcon: {
     width: 40,
@@ -1319,10 +1394,11 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minHeight: 48,
-    maxHeight: 120,
+    maxHeight: COMPOSER_INPUT_MAX_HEIGHT,
     paddingVertical: 12,
     fontSize: 16,
     color: TG.text,
+    textAlignVertical: "top",
   },
   roundSend: {
     width: 48,

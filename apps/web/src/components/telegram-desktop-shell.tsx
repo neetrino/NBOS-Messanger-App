@@ -1,7 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ChatEmojiPickerPanel } from "@/components/chat-emoji-picker-panel";
+
+const CHAT_SCROLL_BOTTOM_THRESHOLD_PX = 80;
+const COMPOSER_TEXTAREA_MIN_PX = 44;
+const COMPOSER_TEXTAREA_MAX_PX = 168;
+
+function syncTextareaHeightToContent(
+  el: HTMLTextAreaElement,
+  minPx: number,
+  maxPx: number,
+) {
+  el.style.height = "0px";
+  const next = Math.max(minPx, Math.min(maxPx, el.scrollHeight));
+  el.style.height = `${next}px`;
+  el.style.overflowY = el.scrollHeight > maxPx ? "auto" : "hidden";
+}
 
 type MemberUser = { id: string; email: string; name: string | null };
 
@@ -115,7 +137,9 @@ export function TelegramDesktopShell({
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
   const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
-  const draftInputRef = useRef<HTMLInputElement | null>(null);
+  const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
+  const userPinnedToBottomRef = useRef(true);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -146,6 +170,74 @@ export function TelegramDesktopShell({
     }
     return out;
   }, [messages]);
+
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const el = messagesScrollRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  const updatePinnedFromScroll = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (!el) {
+      return;
+    }
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const dist = scrollHeight - clientHeight - scrollTop;
+    userPinnedToBottomRef.current = dist <= CHAT_SCROLL_BOTTOM_THRESHOLD_PX;
+  }, []);
+
+  const messageScrollKey = useMemo(
+    () =>
+      `${activeConversationId}:${messages.length}:${messages[messages.length - 1]?.id ?? ""}`,
+    [activeConversationId, messages],
+  );
+
+  useLayoutEffect(() => {
+    userPinnedToBottomRef.current = true;
+    if (!activeConversationId) {
+      return;
+    }
+    scrollMessagesToBottom("auto");
+  }, [activeConversationId, scrollMessagesToBottom]);
+
+  useLayoutEffect(() => {
+    if (!activeConversationId) {
+      return;
+    }
+    if (!userPinnedToBottomRef.current) {
+      return;
+    }
+    scrollMessagesToBottom("auto");
+  }, [activeConversationId, messageScrollKey, scrollMessagesToBottom]);
+
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) {
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      if (userPinnedToBottomRef.current) {
+        requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeConversationId, scrollMessagesToBottom]);
+
+  useLayoutEffect(() => {
+    const el = draftInputRef.current;
+    if (!el) {
+      return;
+    }
+    syncTextareaHeightToContent(
+      el,
+      COMPOSER_TEXTAREA_MIN_PX,
+      COMPOSER_TEXTAREA_MAX_PX,
+    );
+  }, [draft]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -193,9 +285,13 @@ export function TelegramDesktopShell({
   }, [activeConversationId]);
 
   const handleComposerSend = useCallback(() => {
+    if (!draft.trim()) {
+      return;
+    }
+    userPinnedToBottomRef.current = true;
     onSend();
     setEmojiPickerOpen(false);
-  }, [onSend]);
+  }, [draft, onSend]);
 
   const insertEmoji = useCallback(
     (emoji: string) => {
@@ -425,7 +521,11 @@ export function TelegramDesktopShell({
             backgroundColor: "#0e1621",
           }}
         >
-          <div className="tg-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3">
+          <div
+            ref={messagesScrollRef}
+            onScroll={updatePinnedFromScroll}
+            className="tg-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3"
+          >
             {!activeConversationId ? (
               <p className="m-auto text-center text-[#6d7588]">Pick a conversation from the list</p>
             ) : (
@@ -485,27 +585,45 @@ export function TelegramDesktopShell({
                 ) : null}
                 <button
                   type="button"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center text-[#8b92a0] hover:text-[#8774e1]"
-                  aria-label="Emoji"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#8b92a0] transition-colors hover:bg-white/[0.06] hover:text-[#8774e1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8774e1]/55"
+                  aria-label="Open emoji picker"
                   aria-expanded={emojiPickerOpen}
                   aria-haspopup="listbox"
                   onClick={() => setEmojiPickerOpen((v) => !v)}
                 >
-                  🙂
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                    <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none" />
+                    <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none" />
+                  </svg>
                 </button>
-                <input
+                <textarea
                   ref={draftInputRef}
                   value={draft}
+                  rows={1}
                   onChange={(e) => onDraftChange(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleComposerSend();
+                    if (e.key !== "Enter" || e.shiftKey) {
+                      return;
                     }
+                    e.preventDefault();
+                    handleComposerSend();
                   }}
                   placeholder="Message"
                   disabled={!activeConversationId}
-                  className="min-h-[44px] flex-1 bg-transparent py-2.5 pr-2 text-[15px] text-[#e4e6eb] placeholder:text-[#6d7588] outline-none disabled:opacity-50"
+                  className="max-h-[168px] min-h-[44px] flex-1 resize-none bg-transparent py-2.5 pr-2 text-[15px] leading-snug text-[#e4e6eb] placeholder:text-[#6d7588] outline-none disabled:opacity-50"
                 />
                 <button
                   type="button"
