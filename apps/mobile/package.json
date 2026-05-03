@@ -12,6 +12,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@expo/vector-icons": "~15.1.0",
     "@app-messenger/shared": "workspace:*",
     "dotenv": "^17.4.2",
     "expo": "~54.0.33",

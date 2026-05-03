@@ -24,6 +24,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { io, type Socket } from "socket.io-client";
 import { AuthGate } from "./auth-gate";
 import { getApiBaseUrl } from "./api-base";
@@ -960,7 +961,15 @@ export function MessengerRoot() {
                 accessibilityLabel="Open emoji picker"
                 accessibilityState={{ expanded: emojiOpen }}
               >
-                <Text style={styles.inlineIconText}>🙂</Text>
+                {({ pressed }) => (
+                  <Ionicons
+                    name="happy-outline"
+                    size={22}
+                    color={emojiOpen || pressed ? TG.accent : TG.muted}
+                    importantForAccessibility="no"
+                    accessibilityElementsHidden
+                  />
+                )}
               </Pressable>
               <TextInput
                 ref={draftInputRef}
