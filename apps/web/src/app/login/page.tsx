@@ -1,5 +1,6 @@
 "use client";
 
+import { ClipBrandBadge } from "@/components/clip-brand-icon";
 import { getApiBaseUrl } from "@/lib/api-base";
 import { persistWebSession } from "@/lib/session-storage";
 import Link from "next/link";
@@ -68,6 +69,9 @@ function LoginPage() {
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center bg-[#0b121a] px-4 py-8">
       <div className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-[#0e1621] p-6 shadow-xl md:p-8">
+        <div className="mb-5 flex justify-center">
+          <ClipBrandBadge iconSize={30} />
+        </div>
         <h1 className="text-center text-xl font-semibold text-[#e4e6eb] md:text-2xl">
           Sign in
         </h1>

@@ -34,6 +34,7 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { io, type Socket } from "socket.io-client";
+import { ClipBrandIcon } from "./components/clip-brand-icon";
 import { AuthGate } from "./auth-gate";
 import { getApiBaseUrl } from "./api-base";
 import { ChatMessageAttachmentBubble } from "./chat-message-attachment-bubble";
@@ -1256,7 +1257,18 @@ export function MessengerRoot() {
                 accessibilityRole="button"
                 accessibilityLabel="Attach file"
               >
-                <Text style={styles.inlineIconText}>📎</Text>
+                {({ pressed }) => (
+                  <ClipBrandIcon
+                    size={22}
+                    color={
+                      !conversationId || composerSending
+                        ? TG.muted
+                        : pressed
+                          ? TG.accent
+                          : TG.muted
+                    }
+                  />
+                )}
               </Pressable>
             </View>
             <Pressable

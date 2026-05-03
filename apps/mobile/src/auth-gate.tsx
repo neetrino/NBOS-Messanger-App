@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { ClipBrandBadge } from "./components/clip-brand-icon";
 
 const TG = {
   outer: "#0b121a",
@@ -132,6 +133,9 @@ export function AuthGate({ apiBase, onJwtSession, onDemo }: AuthGateProps) {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
+          <View style={styles.brandRow}>
+            <ClipBrandBadge size={52} />
+          </View>
           <Text style={styles.title}>
             {tab === "register" ? "Create account" : "Sign in"}
           </Text>
@@ -318,6 +322,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     gap: 16,
   },
+  brandRow: { alignItems: "center" },
   title: {
     fontSize: 24,
     fontWeight: "700",

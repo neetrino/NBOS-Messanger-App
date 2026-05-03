@@ -1,4 +1,14 @@
 import type { MessageAttachmentDto } from "./attachments";
+export {
+  CLIP_BRAND_BADGE_BG,
+  CLIP_BRAND_BADGE_BORDER,
+  CLIP_BRAND_BODY_PATH,
+  CLIP_BRAND_BROW_PATHS,
+  CLIP_BRAND_BROW_STROKE_WIDTH,
+  CLIP_BRAND_EYES,
+  CLIP_BRAND_STROKE_WIDTH,
+  CLIP_BRAND_VIEWBOX,
+} from "./clip-brand-icon";
 export { DEMO_PASSWORD, DEMO_USERS } from "./demo-users";
 export { EMOJI_QUICK_PICK } from "./emoji-quick-pick";
 export {

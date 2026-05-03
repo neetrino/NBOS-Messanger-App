@@ -17,6 +17,7 @@ import {
 } from "react";
 import { ChatEmojiPickerPanel } from "@/components/chat-emoji-picker-panel";
 import { ChatMessageAttachment } from "@/components/chat-message-attachment";
+import { ClipBrandIcon } from "@/components/clip-brand-icon";
 import { formatFileSize } from "@/lib/chat-attachment-client";
 
 const CHAT_SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -954,7 +955,7 @@ export function TelegramDesktopShell({
                   disabled={!activeConversationId || composerSending}
                   onClick={() => attachInputRef.current?.click()}
                 >
-                  📎
+                  <ClipBrandIcon size={20} className="shrink-0" />
                 </button>
               </div>
               <button
