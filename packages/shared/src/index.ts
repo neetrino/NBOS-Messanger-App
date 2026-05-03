@@ -1,4 +1,5 @@
 export { DEMO_PASSWORD, DEMO_USERS } from "./demo-users";
+export { EMOJI_QUICK_PICK } from "./emoji-quick-pick";
 
 /** Socket.IO event names — keep in sync across web, mobile, and API */
 export const SocketEvents = {

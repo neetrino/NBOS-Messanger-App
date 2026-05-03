@@ -1,4 +1,5 @@
 import {
+  EMOJI_QUICK_PICK,
   SocketEvents,
   type MessageNewPayload,
   type MessageSendPayload,
@@ -7,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -157,11 +159,14 @@ export function MessengerRoot() {
   const [otherUserId, setOtherUserId] = useState("");
   const [createConvBusy, setCreateConvBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [menuPanelMounted, setMenuPanelMounted] = useState(false);
   const menuAnim = useRef(new Animated.Value(0)).current;
   const [listChromeHeight, setListChromeHeight] = useState(0);
   const msgListRef = useRef<FlatList<ChatListRow>>(null);
   const socketRef = useRef<Socket | null>(null);
+  const draftInputRef = useRef<TextInput>(null);
+  const draftSelectionRef = useRef({ start: 0, end: 0 });
 
   const performLogout = useCallback(() => {
     const s = socketRef.current;
@@ -172,6 +177,7 @@ export function MessengerRoot() {
     }
     setSocketReady(false);
     setMenuOpen(false);
+    setEmojiOpen(false);
     setMenuPanelMounted(false);
     menuAnim.setValue(0);
     setToken(null);
@@ -444,7 +450,46 @@ export function MessengerRoot() {
     const payload: MessageSendPayload = { conversationId, body };
     s.emit(SocketEvents.MESSAGE_SEND, payload);
     setDraft("");
+    setEmojiOpen(false);
   }, [conversationId, draft, socketReady]);
+
+  const insertEmoji = useCallback(
+    (emoji: string) => {
+      const { start, end } = draftSelectionRef.current;
+      const next = draft.slice(0, start) + emoji + draft.slice(end);
+      const pos = start + emoji.length;
+      setDraft(next);
+      draftSelectionRef.current = { start: pos, end: pos };
+      requestAnimationFrame(() => {
+        draftInputRef.current?.setNativeProps({
+          selection: { start: pos, end: pos },
+        });
+        draftInputRef.current?.focus();
+      });
+    },
+    [draft],
+  );
+
+  useEffect(() => {
+    if (draft === "") {
+      draftSelectionRef.current = { start: 0, end: 0 };
+    }
+  }, [draft]);
+
+  useEffect(() => {
+    setEmojiOpen(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (stack !== "chat") {
+      setEmojiOpen(false);
+    }
+  }, [stack]);
+
+  const emojiCellSize = useMemo(
+    () => Math.max(36, Math.floor((Dimensions.get("window").width - 32) / 8)),
+    [],
+  );
 
   const convTitle = useMemo(() => {
     const c = conversations.find((x) => x.id === conversationId);
@@ -856,15 +901,25 @@ export function MessengerRoot() {
           )}
           <View style={styles.composer}>
             <View style={styles.inputRow}>
-              <Pressable style={styles.inlineIcon} hitSlop={8}>
+              <Pressable
+                style={styles.inlineIcon}
+                hitSlop={8}
+                onPress={() => setEmojiOpen((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel="Emoji"
+              >
                 <Text style={styles.inlineIconText}>🙂</Text>
               </Pressable>
               <TextInput
+                ref={draftInputRef}
                 style={styles.input}
                 placeholder="Message"
                 placeholderTextColor={TG.muted}
                 value={draft}
                 onChangeText={setDraft}
+                onSelectionChange={(e) => {
+                  draftSelectionRef.current = e.nativeEvent.selection;
+                }}
                 multiline
                 maxLength={2000}
               />
@@ -893,6 +948,41 @@ export function MessengerRoot() {
         </View>
       )}
       </KeyboardAvoidingView>
+      <Modal
+        visible={emojiOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEmojiOpen(false)}
+      >
+        <View style={styles.emojiModalRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setEmojiOpen(false)}
+            accessibilityLabel="Close emoji picker"
+            accessibilityRole="button"
+          />
+          <View style={styles.emojiModalSheet} pointerEvents="box-none">
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+              contentContainerStyle={styles.emojiScrollContent}
+            >
+              {EMOJI_QUICK_PICK.map((e, i) => (
+                <Pressable
+                  key={`${i}:${e}`}
+                  style={[
+                    styles.emojiCell,
+                    { width: emojiCellSize, height: emojiCellSize },
+                  ]}
+                  onPress={() => insertEmoji(e)}
+                >
+                  <Text style={styles.emojiGlyph}>{e}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -1246,4 +1336,31 @@ const styles = StyleSheet.create({
   roundSendOff: { opacity: 0.45 },
   roundSendPressed: { opacity: 0.88 },
   roundSendGlyph: { color: "#fff", fontSize: 18 },
+  emojiModalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  emojiModalSheet: {
+    maxHeight: 280,
+    backgroundColor: "#242f3d",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#3a4555",
+    paddingBottom: Platform.OS === "ios" ? 28 : 14,
+  },
+  emojiScrollContent: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  emojiCell: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  emojiGlyph: { fontSize: 26 },
 });

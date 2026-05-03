@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChatEmojiPickerPanel } from "@/components/chat-emoji-picker-panel";
 
 type MemberUser = { id: string; email: string; name: string | null };
 
@@ -111,7 +112,10 @@ export function TelegramDesktopShell({
   const [search, setSearch] = useState("");
   const [newConvOpen, setNewConvOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
+  const draftInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -156,6 +160,58 @@ export function TelegramDesktopShell({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!emojiPickerOpen) {
+      return;
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      const root = emojiAnchorRef.current;
+      if (root && !root.contains(e.target as Node)) {
+        setEmojiPickerOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [emojiPickerOpen]);
+
+  useEffect(() => {
+    if (!emojiPickerOpen) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setEmojiPickerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [emojiPickerOpen]);
+
+  useEffect(() => {
+    setEmojiPickerOpen(false);
+  }, [activeConversationId]);
+
+  const handleComposerSend = useCallback(() => {
+    onSend();
+    setEmojiPickerOpen(false);
+  }, [onSend]);
+
+  const insertEmoji = useCallback(
+    (emoji: string) => {
+      const el = draftInputRef.current;
+      const start = el?.selectionStart ?? draft.length;
+      const end = el?.selectionEnd ?? draft.length;
+      const next = draft.slice(0, start) + emoji + draft.slice(end);
+      onDraftChange(next);
+      requestAnimationFrame(() => {
+        el?.focus();
+        const pos = start + emoji.length;
+        el?.setSelectionRange(pos, pos);
+      });
+    },
+    [draft, onDraftChange],
+  );
 
   return (
     <div className="flex h-[min(100dvh,900px)] w-full min-w-0 overflow-hidden rounded-xl border border-[#1a2332] shadow-2xl md:h-auto md:min-h-0 md:flex-1 md:rounded-none md:border-0 md:shadow-none">
@@ -364,7 +420,7 @@ export function TelegramDesktopShell({
         ) : null}
 
         <div
-          className="tg-chat-pattern flex min-h-0 flex-1 flex-col overflow-hidden"
+          className="tg-chat-pattern flex min-h-0 flex-1 flex-col overflow-x-hidden"
           style={{
             backgroundColor: "#0e1621",
           }}
@@ -418,21 +474,33 @@ export function TelegramDesktopShell({
 
           <div className="shrink-0 border-t border-[#1f2a3a] bg-[#17212b] px-3 py-2">
             <div className="flex items-end gap-2">
-              <div className="relative flex min-h-[44px] min-w-0 flex-1 items-center rounded-3xl bg-[#242f3d] px-2 ring-1 ring-[#2a3544] focus-within:ring-[#8774e1]/40">
+              <div
+                ref={emojiAnchorRef}
+                className="relative flex min-h-[44px] min-w-0 flex-1 items-center rounded-3xl bg-[#242f3d] px-2 ring-1 ring-[#2a3544] focus-within:ring-[#8774e1]/40"
+              >
+                {emojiPickerOpen ? (
+                  <div className="absolute bottom-[calc(100%+6px)] left-0 z-50 w-[min(100vw-1.5rem,18rem)] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-[#2a3544] bg-[#242f3d] shadow-2xl ring-1 ring-black/20">
+                    <ChatEmojiPickerPanel onPick={insertEmoji} />
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="flex h-9 w-9 shrink-0 items-center justify-center text-[#8b92a0] hover:text-[#8774e1]"
                   aria-label="Emoji"
+                  aria-expanded={emojiPickerOpen}
+                  aria-haspopup="listbox"
+                  onClick={() => setEmojiPickerOpen((v) => !v)}
                 >
                   🙂
                 </button>
                 <input
+                  ref={draftInputRef}
                   value={draft}
                   onChange={(e) => onDraftChange(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      onSend();
+                      handleComposerSend();
                     }
                   }}
                   placeholder="Message"
@@ -451,7 +519,7 @@ export function TelegramDesktopShell({
                 type="button"
                 onClick={() => {
                   if (draft.trim()) {
-                    onSend();
+                    handleComposerSend();
                   }
                 }}
                 disabled={!activeConversationId}
