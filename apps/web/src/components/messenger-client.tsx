@@ -340,27 +340,29 @@ export function MessengerClient() {
   }
 
   return (
-    <TelegramDesktopShell
-      userEmail={user.email}
-      userId={user.id}
-      accountKind={accountKind}
-      demoPersonas={accountKind === "demo" ? DEMO_USERS : undefined}
-      activeDemoIndex={accountKind === "demo" ? activeDemoIndex : undefined}
-      onDemoIndexChange={accountKind === "demo" ? setActiveDemoIndex : undefined}
-      conversations={conversations}
-      activeConversationId={activeConversationId}
-      onSelectConversation={setActiveConversationId}
-      messages={messages}
-      draft={draft}
-      onDraftChange={setDraft}
-      onSend={sendMessage}
-      socketConnected={Boolean(socket?.connected)}
-      error={error}
-      otherUserId={otherUserId}
-      onOtherUserIdChange={setOtherUserId}
-      onCreateConversation={() => void createConversation()}
-      onLogout={handleLogout}
-      onDeleteMessage={(messageId, mode) => void deleteMessage(messageId, mode)}
-    />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <TelegramDesktopShell
+        userEmail={user.email}
+        userId={user.id}
+        accountKind={accountKind}
+        demoPersonas={accountKind === "demo" ? DEMO_USERS : undefined}
+        activeDemoIndex={accountKind === "demo" ? activeDemoIndex : undefined}
+        onDemoIndexChange={accountKind === "demo" ? setActiveDemoIndex : undefined}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelectConversation={setActiveConversationId}
+        messages={messages}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSend={sendMessage}
+        socketConnected={Boolean(socket?.connected)}
+        error={error}
+        otherUserId={otherUserId}
+        onOtherUserIdChange={setOtherUserId}
+        onCreateConversation={() => void createConversation()}
+        onLogout={handleLogout}
+        onDeleteMessage={(messageId, mode) => void deleteMessage(messageId, mode)}
+      />
+    </div>
   );
 }

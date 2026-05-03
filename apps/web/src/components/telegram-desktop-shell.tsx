@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { ChatEmojiPickerPanel } from "@/components/chat-emoji-picker-panel";
 
@@ -62,7 +63,7 @@ export type TelegramDesktopShellProps = {
   error: string | null;
   otherUserId: string;
   onOtherUserIdChange: (value: string) => void;
-  onCreateConversation: () => void;
+  onCreateConversation: () => void | Promise<void>;
   onLogout: () => void;
   onDeleteMessage: (messageId: string, mode: "for-me" | "for-everyone") => void;
 };
@@ -113,6 +114,26 @@ function formatDayLabel(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
 }
 
+const MD_UP_MEDIA_QUERY = "(min-width: 768px)";
+
+function subscribeMdUp(callback: () => void): () => void {
+  const mq = window.matchMedia(MD_UP_MEDIA_QUERY);
+  mq.addEventListener("change", callback);
+  return () => mq.removeEventListener("change", callback);
+}
+
+function getMdUpSnapshot(): boolean {
+  return window.matchMedia(MD_UP_MEDIA_QUERY).matches;
+}
+
+function getMdUpServerSnapshot(): boolean {
+  return false;
+}
+
+function useMdUp(): boolean {
+  return useSyncExternalStore(subscribeMdUp, getMdUpSnapshot, getMdUpServerSnapshot);
+}
+
 export function TelegramDesktopShell({
   userEmail,
   userId,
@@ -135,6 +156,8 @@ export function TelegramDesktopShell({
   onLogout,
   onDeleteMessage,
 }: TelegramDesktopShellProps) {
+  const isMdUp = useMdUp();
+  const [mobilePane, setMobilePane] = useState<"list" | "chat">("list");
   const [search, setSearch] = useState("");
   const [newConvOpen, setNewConvOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -149,6 +172,7 @@ export function TelegramDesktopShell({
   const skipMessageContextPointerDismissRef = useRef(false);
   const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
   const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerStripRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const userPinnedToBottomRef = useRef(true);
 
@@ -223,6 +247,31 @@ export function TelegramDesktopShell({
     }
     scrollMessagesToBottom("auto");
   }, [activeConversationId, messageScrollKey, scrollMessagesToBottom]);
+
+  /** Narrow layout: chat pane was `hidden` on the list; opening it needs a fresh scroll after layout. */
+  useLayoutEffect(() => {
+    if (isMdUp || mobilePane !== "chat" || !activeConversationId) {
+      return;
+    }
+    userPinnedToBottomRef.current = true;
+    const syncComposerIntoView = () => {
+      scrollMessagesToBottom("auto");
+      composerStripRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+    };
+    syncComposerIntoView();
+    let outer = 0;
+    let inner = 0;
+    outer = window.requestAnimationFrame(() => {
+      syncComposerIntoView();
+      inner = window.requestAnimationFrame(() => {
+        syncComposerIntoView();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(outer);
+      window.cancelAnimationFrame(inner);
+    };
+  }, [activeConversationId, isMdUp, mobilePane, scrollMessagesToBottom]);
 
   useEffect(() => {
     const el = messagesScrollRef.current;
@@ -300,6 +349,15 @@ export function TelegramDesktopShell({
   }, [activeConversationId]);
 
   useEffect(() => {
+    if (isMdUp) {
+      return;
+    }
+    if (!activeConversationId) {
+      setMobilePane("list");
+    }
+  }, [activeConversationId, isMdUp]);
+
+  useEffect(() => {
     if (!messageContext) {
       return;
     }
@@ -354,10 +412,17 @@ export function TelegramDesktopShell({
     [draft, onDraftChange],
   );
 
+  const showListPane = isMdUp || mobilePane === "list";
+  const showChatPane = isMdUp || mobilePane === "chat";
+
   return (
-    <div className="flex h-[min(100dvh,900px)] w-full min-w-0 overflow-hidden rounded-xl border border-[#1a2332] shadow-2xl md:h-auto md:min-h-0 md:flex-1 md:rounded-none md:border-0 md:shadow-none">
+    <div className="flex h-[min(100dvh,900px)] w-full min-h-0 min-w-0 max-md:h-full max-md:max-h-full flex-1 flex-row overflow-hidden rounded-xl border border-[#1a2332] shadow-2xl md:h-auto md:min-h-0 md:flex-1 md:rounded-none md:border-0 md:shadow-none">
       {/* Sidebar */}
-      <aside className="flex w-[min(100%,340px)] shrink-0 flex-col bg-[#292f3f] text-[#e4e6eb] min-w-0 overflow-x-hidden">
+      <aside
+        className={`flex min-h-0 min-w-0 flex-col overflow-x-hidden bg-[#292f3f] text-[#e4e6eb] md:w-[min(100%,340px)] md:shrink-0 ${
+          showListPane ? "flex-1 md:flex-none" : "hidden md:flex"
+        }`}
+      >
         <div ref={menuRootRef} className="relative z-20 min-w-0 shrink-0 px-2 pt-2.5">
           <div className="flex items-center gap-2">
             <button
@@ -467,7 +532,12 @@ export function TelegramDesktopShell({
               <button
                 key={c.id}
                 type="button"
-                onClick={() => onSelectConversation(c.id)}
+                onClick={() => {
+                  onSelectConversation(c.id);
+                  if (!isMdUp) {
+                    setMobilePane("chat");
+                  }
+                }}
                 className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                   on ? "bg-[#8774e1] text-white" : "hover:bg-[#343a4a]"
                 }`}
@@ -516,8 +586,13 @@ export function TelegramDesktopShell({
               <button
                 type="button"
                 onClick={() => {
-                  onCreateConversation();
-                  setNewConvOpen(false);
+                  void (async () => {
+                    await onCreateConversation();
+                    setNewConvOpen(false);
+                    if (!isMdUp) {
+                      setMobilePane("chat");
+                    }
+                  })();
                 }}
                 className="rounded-lg bg-[#8774e1] py-2 text-[13px] font-semibold text-white hover:bg-[#7667d4]"
               >
@@ -529,8 +604,24 @@ export function TelegramDesktopShell({
       </aside>
 
       {/* Main chat */}
-      <div className="flex min-w-0 flex-1 flex-col bg-[#0e1621]">
-        <header className="flex shrink-0 items-center gap-3 border-b border-[#1f2a3a] bg-[#17212b] px-4 py-2 text-[#e4e6eb]">
+      <div
+        className={`flex min-h-0 min-w-0 flex-1 flex-col bg-[#0e1621] ${
+          showChatPane ? "flex md:flex" : "hidden md:flex"
+        }`}
+      >
+        <header className="sticky top-0 z-30 flex shrink-0 items-center gap-2 border-b border-[#1f2a3a] bg-[#17212b] px-3 py-2 text-[#e4e6eb] sm:gap-3 sm:px-4">
+          {!isMdUp ? (
+            <button
+              type="button"
+              onClick={() => setMobilePane("list")}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#a8adb7] hover:bg-[#2b5278]/40 hover:text-white md:hidden"
+              aria-label="Back to chats"
+            >
+              <span className="text-xl leading-none" aria-hidden>
+                ←
+              </span>
+            </button>
+          ) : null}
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#6c8eef] text-sm font-semibold text-white">
             {initials(headerTitle)}
           </span>
@@ -651,7 +742,10 @@ export function TelegramDesktopShell({
             )}
           </div>
 
-          <div className="shrink-0 border-t border-[#1f2a3a] bg-[#17212b] px-3 py-2">
+          <div
+            ref={composerStripRef}
+            className="shrink-0 border-t border-[#1f2a3a] bg-[#17212b] px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
+          >
             <div className="flex items-end gap-2">
               <div
                 ref={emojiAnchorRef}
