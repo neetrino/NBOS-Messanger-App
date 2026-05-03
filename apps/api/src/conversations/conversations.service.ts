@@ -4,17 +4,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { MESSAGE_DELETED_BODY } from '@app-messenger/shared';
 import type { Message } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type ConversationMessageDto = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  createdAt: string;
+  deletedForEveryone?: boolean;
+};
 
 @Injectable()
 export class ConversationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createForMembers(params: {
-    title?: string;
-    memberIds: string[];
-  }) {
+  async createForMembers(params: { title?: string; memberIds: string[] }) {
     const unique = [...new Set(params.memberIds)];
     if (unique.length < 2) {
       throw new BadRequestException(
@@ -67,13 +74,31 @@ export class ConversationsService {
     userId: string,
     conversationId: string,
     take = 50,
-  ): Promise<Message[]> {
+  ): Promise<ConversationMessageDto[]> {
     await this.assertMember(userId, conversationId);
     const rows = await this.prisma.message.findMany({
-      where: { conversationId },
+      where: {
+        conversationId,
+        NOT: { hiddenForUserIds: { has: userId } },
+      },
       orderBy: { createdAt: 'desc' },
       take: Math.min(take, 100),
     });
-    return rows.reverse();
+    return rows.reverse().map((m) => this.mapMessageForViewer(m));
+  }
+
+  private mapMessageForViewer(m: Message): ConversationMessageDto {
+    const deletedForEveryone = Boolean(m.deletedForEveryoneAt);
+    const base: ConversationMessageDto = {
+      id: m.id,
+      conversationId: m.conversationId,
+      senderId: m.senderId,
+      body: deletedForEveryone ? MESSAGE_DELETED_BODY : m.body,
+      createdAt: m.createdAt.toISOString(),
+    };
+    if (deletedForEveryone) {
+      base.deletedForEveryone = true;
+    }
+    return base;
   }
 }

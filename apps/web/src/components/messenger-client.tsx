@@ -3,7 +3,9 @@
 import {
   DEMO_PASSWORD,
   DEMO_USERS,
+  MESSAGE_DELETED_BODY,
   SocketEvents,
+  type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
   type MessageSendPayload,
 } from "@app-messenger/shared";
@@ -77,6 +79,7 @@ type MessageRow = {
   senderId: string;
   body: string;
   createdAt: string;
+  deletedForEveryone?: boolean;
 };
 
 export function MessengerClient() {
@@ -206,6 +209,38 @@ export function MessengerClient() {
     setMessages(rows);
   }, [activeConversationId, apiBase, authHeaders]);
 
+  const deleteMessage = useCallback(
+    async (messageId: string, mode: "for-me" | "for-everyone") => {
+      if (!authHeaders) {
+        return;
+      }
+      const res = await fetch(
+        `${apiBase}/messages/${encodeURIComponent(messageId)}?mode=${encodeURIComponent(mode)}`,
+        { method: "DELETE", headers: authHeaders },
+      );
+      if (!res.ok) {
+        setError(formatApiError(res.status, await res.text()));
+        return;
+      }
+      if (mode === "for-me") {
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                body: MESSAGE_DELETED_BODY,
+                deletedForEveryone: true,
+              }
+            : m,
+        ),
+      );
+    },
+    [apiBase, authHeaders],
+  );
+
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
@@ -241,6 +276,28 @@ export function MessengerClient() {
         ];
       });
     });
+    s.on(
+      SocketEvents.MESSAGE_DELETED_FOR_EVERYONE,
+      (payload: MessageDeletedForEveryonePayload) => {
+        if (payload.conversationId !== activeConversationId) {
+          return;
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === payload.id
+              ? {
+                  id: payload.id,
+                  conversationId: payload.conversationId,
+                  senderId: payload.senderId,
+                  body: payload.body,
+                  createdAt: payload.createdAt,
+                  deletedForEveryone: true,
+                }
+              : m,
+          ),
+        );
+      },
+    );
     return () => {
       s.removeAllListeners();
       s.disconnect();
@@ -303,6 +360,7 @@ export function MessengerClient() {
       onOtherUserIdChange={setOtherUserId}
       onCreateConversation={() => void createConversation()}
       onLogout={handleLogout}
+      onDeleteMessage={(messageId, mode) => void deleteMessage(messageId, mode)}
     />
   );
 }

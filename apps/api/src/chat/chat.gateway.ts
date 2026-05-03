@@ -10,6 +10,7 @@ import {
 } from '@nestjs/websockets';
 import {
   SocketEvents,
+  type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
 } from '@app-messenger/shared';
 import type { Server, Socket } from 'socket.io';
@@ -101,6 +102,14 @@ export class ChatGateway implements OnGatewayConnection {
     this.server
       .to(roomName(saved.conversationId))
       .emit(SocketEvents.MESSAGE_NEW, payload);
+  }
+
+  emitMessageDeletedForEveryone(
+    payload: MessageDeletedForEveryonePayload,
+  ): void {
+    this.server
+      .to(roomName(payload.conversationId))
+      .emit(SocketEvents.MESSAGE_DELETED_FOR_EVERYONE, payload);
   }
 
   private extractToken(client: Socket): string | undefined {

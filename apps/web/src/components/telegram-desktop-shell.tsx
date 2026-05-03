@@ -1,5 +1,6 @@
 "use client";
 
+import { MESSAGE_DELETED_BODY } from "@app-messenger/shared";
 import {
   useCallback,
   useEffect,
@@ -40,6 +41,7 @@ type MessageRow = {
   senderId: string;
   body: string;
   createdAt: string;
+  deletedForEveryone?: boolean;
 };
 
 export type TelegramDesktopShellProps = {
@@ -62,6 +64,7 @@ export type TelegramDesktopShellProps = {
   onOtherUserIdChange: (value: string) => void;
   onCreateConversation: () => void;
   onLogout: () => void;
+  onDeleteMessage: (messageId: string, mode: "for-me" | "for-everyone") => void;
 };
 
 function displayName(user: MemberUser): string {
@@ -130,12 +133,20 @@ export function TelegramDesktopShell({
   onOtherUserIdChange,
   onCreateConversation,
   onLogout,
+  onDeleteMessage,
 }: TelegramDesktopShellProps) {
   const [search, setSearch] = useState("");
   const [newConvOpen, setNewConvOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [messageContext, setMessageContext] = useState<{
+    x: number;
+    y: number;
+    m: MessageRow;
+  } | null>(null);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const messageContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const skipMessageContextPointerDismissRef = useRef(false);
   const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
   const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -283,6 +294,40 @@ export function TelegramDesktopShell({
   useEffect(() => {
     setEmojiPickerOpen(false);
   }, [activeConversationId]);
+
+  useEffect(() => {
+    setMessageContext(null);
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    if (!messageContext) {
+      return;
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      if (skipMessageContextPointerDismissRef.current) {
+        return;
+      }
+      const root = messageContextMenuRef.current;
+      if (root && !root.contains(e.target as Node)) {
+        setMessageContext(null);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [messageContext]);
+
+  useEffect(() => {
+    if (!messageContext) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMessageContext(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [messageContext]);
 
   const handleComposerSend = useCallback(() => {
     if (!draft.trim()) {
@@ -543,6 +588,30 @@ export function TelegramDesktopShell({
                       className={`flex max-w-[min(100%,520px)] flex-col gap-0.5 ${
                         row.m.senderId === userId ? "self-end items-end" : "self-start items-start"
                       }`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const MENU_W = 220;
+                        const MENU_H = 96;
+                        const pad = 8;
+                        const vw =
+                          typeof window !== "undefined" ? window.innerWidth : e.clientX + MENU_W;
+                        const vh =
+                          typeof window !== "undefined" ? window.innerHeight : e.clientY + MENU_H;
+                        const x = Math.min(
+                          Math.max(pad, e.clientX),
+                          Math.max(pad, vw - MENU_W - pad),
+                        );
+                        const y = Math.min(
+                          Math.max(pad, e.clientY),
+                          Math.max(pad, vh - MENU_H - pad),
+                        );
+                        skipMessageContextPointerDismissRef.current = true;
+                        setMessageContext({ x, y, m: row.m });
+                        window.setTimeout(() => {
+                          skipMessageContextPointerDismissRef.current = false;
+                        }, 0);
+                      }}
                     >
                       {row.m.senderId !== userId ? (
                         <span className="px-1 text-[11px] text-[#8b92a0]">
@@ -556,7 +625,17 @@ export function TelegramDesktopShell({
                             : "rounded-bl-md bg-[#2b5278] text-[#e4ecf5]"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap text-[15px] leading-snug">{row.m.body}</p>
+                        <p
+                          className={`whitespace-pre-wrap text-[15px] leading-snug ${
+                            row.m.deletedForEveryone || row.m.body === MESSAGE_DELETED_BODY
+                              ? row.m.senderId === userId
+                                ? "italic text-white/85"
+                                : "italic text-[#b8c9dc]"
+                              : ""
+                          }`}
+                        >
+                          {row.m.body}
+                        </p>
                         <p
                           className={`mt-1 text-right text-[11px] ${
                             row.m.senderId === userId ? "text-white/70" : "text-[#8eb4e0]"
@@ -650,6 +729,47 @@ export function TelegramDesktopShell({
           </div>
         </div>
       </div>
+
+      {messageContext ? (
+        <div
+          ref={messageContextMenuRef}
+          role="menu"
+          aria-label="Message actions"
+          className="fixed z-[80] w-[min(100vw-1rem,220px)] overflow-hidden rounded-[10px] border border-[#2f3f52] bg-[#222d3b] py-1 shadow-[0_8px_28px_rgba(0,0,0,0.42)]"
+          style={{ left: messageContext.x, top: messageContext.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full px-3 py-2.5 text-left text-[14px] text-[#ff8a8a] transition-colors hover:bg-white/[0.06]"
+            onClick={() => {
+              onDeleteMessage(messageContext.m.id, "for-me");
+              setMessageContext(null);
+            }}
+          >
+            Delete for me
+          </button>
+          {messageContext.m.senderId === userId ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full px-3 py-2.5 text-left text-[14px] text-[#ff8a8a] transition-colors hover:bg-white/[0.06]"
+              onClick={() => {
+                const ok = window.confirm(
+                  "This will remove the message for all participants. Continue?",
+                );
+                if (!ok) {
+                  return;
+                }
+                onDeleteMessage(messageContext.m.id, "for-everyone");
+                setMessageContext(null);
+              }}
+            >
+              Delete for everyone
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

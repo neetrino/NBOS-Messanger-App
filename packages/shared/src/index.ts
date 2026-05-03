@@ -1,12 +1,16 @@
 export { DEMO_PASSWORD, DEMO_USERS } from "./demo-users";
 export { EMOJI_QUICK_PICK } from "./emoji-quick-pick";
 
+/** Shown in chat when a message was deleted for everyone */
+export const MESSAGE_DELETED_BODY = "This message was deleted";
+
 /** Socket.IO event names — keep in sync across web, mobile, and API */
 export const SocketEvents = {
   JOIN_CONVERSATION: "conversation:join",
   LEAVE_CONVERSATION: "conversation:leave",
   MESSAGE_SEND: "message:send",
   MESSAGE_NEW: "message:new",
+  MESSAGE_DELETED_FOR_EVERYONE: "message:deleted-for-everyone",
   ERROR: "error",
 } as const;
 
@@ -18,6 +22,15 @@ export type MessageNewPayload = {
   senderId: string;
   body: string;
   createdAt: string;
+};
+
+export type MessageDeletedForEveryonePayload = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  createdAt: string;
+  deletedForEveryone: true;
 };
 
 export type MessageSendPayload = {

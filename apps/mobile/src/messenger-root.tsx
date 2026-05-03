@@ -1,12 +1,15 @@
 import {
   EMOJI_QUICK_PICK,
+  MESSAGE_DELETED_BODY,
   SocketEvents,
+  type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
   type MessageSendPayload,
 } from "@app-messenger/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -44,6 +47,7 @@ type MessageRow = {
   senderId: string;
   body: string;
   createdAt: string;
+  deletedForEveryone?: boolean;
 };
 
 function displayName(user: MemberUser | Me): string {
@@ -166,6 +170,9 @@ export function MessengerRoot() {
   const [createConvBusy, setCreateConvBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [deleteActionMessage, setDeleteActionMessage] = useState<MessageRow | null>(
+    null,
+  );
   const [composerInputHeight, setComposerInputHeight] = useState(48);
   const [menuPanelMounted, setMenuPanelMounted] = useState(false);
   const menuAnim = useRef(new Animated.Value(0)).current;
@@ -186,6 +193,7 @@ export function MessengerRoot() {
     setSocketReady(false);
     setMenuOpen(false);
     setEmojiOpen(false);
+    setDeleteActionMessage(null);
     setMenuPanelMounted(false);
     menuAnim.setValue(0);
     setToken(null);
@@ -328,6 +336,39 @@ export function MessengerRoot() {
     [apiBase, authHeaders],
   );
 
+  const deleteMessage = useCallback(
+    async (messageId: string, mode: "for-me" | "for-everyone") => {
+      if (!token) {
+        return;
+      }
+      const res = await fetch(
+        `${apiBase}/messages/${encodeURIComponent(messageId)}?mode=${encodeURIComponent(mode)}`,
+        { method: "DELETE", headers: authHeaders(token) },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        setLoadError(text || `Delete failed (${res.status})`);
+        return;
+      }
+      if (mode === "for-me") {
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                body: MESSAGE_DELETED_BODY,
+                deletedForEveryone: true,
+              }
+            : m,
+        ),
+      );
+    },
+    [apiBase, authHeaders, token],
+  );
+
   useEffect(() => {
     if (sessionMode !== "demo") {
       return;
@@ -438,9 +479,29 @@ export function MessengerRoot() {
         return [...prev, next];
       });
     };
+    const onDeletedForEveryone = (payload: MessageDeletedForEveryonePayload) => {
+      if (payload.conversationId !== conversationId) {
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === payload.id
+            ? {
+                id: payload.id,
+                conversationId: payload.conversationId,
+                senderId: payload.senderId,
+                body: payload.body,
+                createdAt: payload.createdAt,
+                deletedForEveryone: true,
+              }
+            : m,
+        ),
+      );
+    };
     s.on("connect", onConnect);
     s.on("disconnect", onDisconnect);
     s.on(SocketEvents.MESSAGE_NEW, onMsg);
+    s.on(SocketEvents.MESSAGE_DELETED_FOR_EVERYONE, onDeletedForEveryone);
     return () => {
       setSocketReady(false);
       s.removeAllListeners();
@@ -448,6 +509,10 @@ export function MessengerRoot() {
       socketRef.current = null;
     };
   }, [apiBase, conversationId, token]);
+
+  useEffect(() => {
+    setDeleteActionMessage(null);
+  }, [conversationId]);
 
   const send = useCallback(() => {
     const s = socketRef.current;
@@ -917,36 +982,44 @@ export function MessengerRoot() {
                   .find((c) => c.id === item.conversationId)
                   ?.members.find((m) => m.userId === item.senderId)?.user;
                 const who = sender ? displayName(sender) : item.senderId.slice(0, 6);
+                const isTombstone =
+                  item.deletedForEveryone || item.body === MESSAGE_DELETED_BODY;
                 return (
-                  <View
-                    style={[
-                      styles.bubbleWrap,
-                      mine ? styles.bubbleMine : styles.bubbleTheirs,
-                    ]}
+                  <Pressable
+                    delayLongPress={450}
+                    onLongPress={() => setDeleteActionMessage(item)}
                   >
-                    {!mine ? <Text style={styles.bubbleMeta}>{who}</Text> : null}
                     <View
                       style={[
-                        styles.bubble,
-                        mine ? styles.bubbleBgMine : styles.bubbleBgTheirs,
+                        styles.bubbleWrap,
+                        mine ? styles.bubbleMine : styles.bubbleTheirs,
                       ]}
                     >
-                      <Text
-                        style={
-                          mine ? styles.bubbleTextMine : styles.bubbleTextTheirs
-                        }
+                      {!mine ? <Text style={styles.bubbleMeta}>{who}</Text> : null}
+                      <View
+                        style={[
+                          styles.bubble,
+                          mine ? styles.bubbleBgMine : styles.bubbleBgTheirs,
+                        ]}
                       >
-                        {item.body}
-                      </Text>
-                      <Text
-                        style={
-                          mine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs
-                        }
-                      >
-                        {formatMsgTime(item.createdAt)}
-                      </Text>
+                        <Text
+                          style={[
+                            mine ? styles.bubbleTextMine : styles.bubbleTextTheirs,
+                            isTombstone && styles.bubbleTextTombstone,
+                          ]}
+                        >
+                          {item.body}
+                        </Text>
+                        <Text
+                          style={
+                            mine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs
+                          }
+                        >
+                          {formatMsgTime(item.createdAt)}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
+                  </Pressable>
                 );
               }}
             />
@@ -1032,6 +1105,81 @@ export function MessengerRoot() {
         </View>
       )}
       </KeyboardAvoidingView>
+      <Modal
+        visible={deleteActionMessage !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteActionMessage(null)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => setDeleteActionMessage(null)}
+            accessibilityLabel="Close delete menu"
+            accessibilityRole="button"
+          />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Message</Text>
+            <Pressable
+              onPress={() => {
+                const m = deleteActionMessage;
+                if (!m) {
+                  return;
+                }
+                setDeleteActionMessage(null);
+                void deleteMessage(m.id, "for-me");
+              }}
+              style={({ pressed }) => [
+                styles.deleteSheetRow,
+                pressed && styles.modalBtnPressed,
+              ]}
+            >
+              <Text style={styles.deleteSheetRowText}>Delete for me</Text>
+            </Pressable>
+            {deleteActionMessage &&
+            deleteActionMessage.senderId === me?.id ? (
+              <Pressable
+                onPress={() => {
+                  const m = deleteActionMessage;
+                  if (!m) {
+                    return;
+                  }
+                  Alert.alert(
+                    "Delete for everyone",
+                    "This will remove the message for all participants.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Delete for everyone",
+                        style: "destructive",
+                        onPress: () => {
+                          setDeleteActionMessage(null);
+                          void deleteMessage(m.id, "for-everyone");
+                        },
+                      },
+                    ],
+                  );
+                }}
+                style={({ pressed }) => [
+                  styles.deleteSheetRow,
+                  pressed && styles.modalBtnPressed,
+                ]}
+              >
+                <Text style={styles.deleteSheetRowText}>Delete for everyone</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => setDeleteActionMessage(null)}
+              style={({ pressed }) => [
+                styles.deleteSheetCancel,
+                pressed && styles.modalBtnPressed,
+              ]}
+            >
+              <Text style={styles.deleteSheetCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <Modal
         visible={emojiOpen}
         transparent
@@ -1359,6 +1507,29 @@ const styles = StyleSheet.create({
   },
   bubbleTextMine: { color: "#fff", fontSize: 16 },
   bubbleTextTheirs: { color: "#e4ecf5", fontSize: 16 },
+  bubbleTextTombstone: { fontStyle: "italic", opacity: 0.88 },
+  deleteSheetRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#2f3f52",
+  },
+  deleteSheetRowText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#eb8686",
+  },
+  deleteSheetCancel: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  deleteSheetCancelText: {
+    fontSize: 16,
+    color: TG.link,
+    textAlign: "center",
+    fontWeight: "600",
+  },
   bubbleTimeMine: {
     fontSize: 11,
     color: "rgba(255,255,255,0.65)",

@@ -39,11 +39,15 @@ model ConversationMember {
 }
 
 model Message {
-  id             String   @id @default(cuid())
-  conversationId String
-  senderId       String
-  body           String
-  createdAt      DateTime @default(now())
+  id                     String    @id @default(cuid())
+  conversationId         String
+  senderId               String
+  body                   String
+  createdAt              DateTime  @default(now())
+  /// User ids for whom this message is hidden (delete for me)
+  hiddenForUserIds       String[]  @default([])
+  /// When set, message is deleted for all participants (tombstone in API)
+  deletedForEveryoneAt   DateTime?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
