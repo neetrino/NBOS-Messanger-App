@@ -1247,22 +1247,9 @@ export function MessengerRoot() {
                   );
                   setComposerInputHeight(next);
                 }}
-                onKeyPress={(e) => {
-                  if (e.nativeEvent.key !== "Enter") {
-                    return;
-                  }
-                  const ne = e.nativeEvent as {
-                    shiftKey?: boolean;
-                    preventDefault?: () => void;
-                  };
-                  if (ne.shiftKey) {
-                    return;
-                  }
-                  ne.preventDefault?.();
-                  void send();
-                }}
                 multiline
                 blurOnSubmit={false}
+                returnKeyType="default"
                 maxLength={2000}
               />
               <Pressable
