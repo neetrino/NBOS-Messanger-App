@@ -262,7 +262,7 @@ export function MessengerClient() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center gap-4 py-16 text-[#8b92a0]">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-[#8b92a0]">
         <p className="text-[15px]">Signing in…</p>
         {error ? (
           <p className="max-w-md whitespace-pre-wrap text-center text-[13px] text-[#ff8a8a]">

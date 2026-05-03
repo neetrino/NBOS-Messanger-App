@@ -154,7 +154,7 @@ export function TelegramDesktopShell({
   }, [menuOpen]);
 
   return (
-    <div className="flex h-[min(100dvh,900px)] w-full max-w-[1200px] mx-auto rounded-xl overflow-hidden shadow-2xl border border-[#1a2332]">
+    <div className="flex h-[min(100dvh,900px)] w-full min-w-0 overflow-hidden rounded-xl border border-[#1a2332] shadow-2xl md:h-auto md:min-h-0 md:flex-1 md:rounded-none md:border-0 md:shadow-none">
       {/* Sidebar */}
       <aside className="flex w-[min(100%,340px)] shrink-0 flex-col bg-[#292f3f] text-[#e4e6eb] min-w-0 overflow-x-hidden">
         <div ref={menuRootRef} className="relative z-20 min-w-0 shrink-0 px-2 pt-2.5">
@@ -254,7 +254,7 @@ export function TelegramDesktopShell({
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="tg-scrollbar flex-1 min-h-0 overflow-y-auto">
           {filtered.map((c) => {
             const on = c.id === activeConversationId;
             const label = conversationLabel(c, userId);
@@ -365,7 +365,7 @@ export function TelegramDesktopShell({
             backgroundColor: "#0e1621",
           }}
         >
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3">
+          <div className="tg-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3">
             {!activeConversationId ? (
               <p className="m-auto text-center text-[#6d7588]">Pick a conversation from the list</p>
             ) : (
