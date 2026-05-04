@@ -1,17 +1,21 @@
 "use client";
 
 import {
+  CHAT_TYPING_PRESENCE_TTL_MS,
   DEMO_PASSWORD,
   DEMO_USERS,
   MESSAGE_DELETED_BODY,
+  OutgoingTypingController,
   SocketEvents,
+  formatTypingIndicatorText,
   type MessageAttachmentDto,
   type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
   type MessageSendPayload,
+  type TypingPresencePayload,
 } from "@app-messenger/shared";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "@/lib/api-base";
 import { clearWebSession, readWebSession } from "@/lib/session-storage";
@@ -106,6 +110,19 @@ export function MessengerClient() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [accountKind, setAccountKind] = useState<"demo" | "session">("demo");
+  const [typingPeers, setTypingPeers] = useState<
+    Record<string, { displayName: string }>
+  >({});
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  const outgoingTypingRef = useRef<OutgoingTypingController | null>(null);
+  const typingExpiryTimersRef = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
+  const userIdRef = useRef<string | undefined>(undefined);
+  userIdRef.current = user?.id;
 
   const authHeaders = useMemo(() => {
     if (!token) {
@@ -277,6 +294,61 @@ export function MessengerClient() {
     setAttachmentError(null);
   }, [activeConversationId, clearPendingAttachment]);
 
+  const clearTypingExpiryTimer = useCallback((userId: string) => {
+    const t = typingExpiryTimersRef.current[userId];
+    if (t) {
+      clearTimeout(t);
+    }
+    delete typingExpiryTimersRef.current[userId];
+  }, []);
+
+  const clearAllTypingExpiryTimers = useCallback(() => {
+    for (const id of Object.keys(typingExpiryTimersRef.current)) {
+      clearTypingExpiryTimer(id);
+    }
+  }, [clearTypingExpiryTimer]);
+
+  const applyRemoteTypingPayload = useCallback(
+    (payload: TypingPresencePayload) => {
+      const me = userIdRef.current;
+      if (!me || payload.userId === me) {
+        return;
+      }
+      if (payload.conversationId !== activeConversationId) {
+        return;
+      }
+      if (!payload.isTyping) {
+        clearTypingExpiryTimer(payload.userId);
+        setTypingPeers((prev) => {
+          if (!prev[payload.userId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[payload.userId];
+          return next;
+        });
+        return;
+      }
+      clearTypingExpiryTimer(payload.userId);
+      setTypingPeers((prev) => ({
+        ...prev,
+        [payload.userId]: { displayName: payload.userName },
+      }));
+      typingExpiryTimersRef.current[payload.userId] = setTimeout(() => {
+        setTypingPeers((prev) => {
+          if (!prev[payload.userId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[payload.userId];
+          return next;
+        });
+        delete typingExpiryTimersRef.current[payload.userId];
+      }, CHAT_TYPING_PRESENCE_TTL_MS);
+    },
+    [activeConversationId, clearTypingExpiryTimer],
+  );
+
   useEffect(() => {
     if (!token || !activeConversationId) {
       return;
@@ -286,10 +358,25 @@ export function MessengerClient() {
       auth: { token },
     });
     setSocket(s);
+    setTypingPeers({});
+    clearAllTypingExpiryTimers();
+
+    const outgoing = new OutgoingTypingController((isTyping) => {
+      if (!s.connected) {
+        return;
+      }
+      s.emit(SocketEvents.TYPING_SEND, {
+        conversationId: activeConversationId,
+        isTyping,
+      });
+    });
+    outgoingTypingRef.current = outgoing;
+
     s.on("connect", () => {
       s.emit(SocketEvents.JOIN_CONVERSATION, {
         conversationId: activeConversationId,
       });
+      outgoing.syncDraft(draftRef.current);
     });
     s.on(SocketEvents.MESSAGE_NEW, (payload: MessageNewPayload) => {
       setMessages((prev) => {
@@ -332,12 +419,62 @@ export function MessengerClient() {
         );
       },
     );
+    s.on(SocketEvents.TYPING_UPDATE, (payload: TypingPresencePayload) => {
+      applyRemoteTypingPayload(payload);
+    });
+    s.on("disconnect", () => {
+      setTypingPeers({});
+      clearAllTypingExpiryTimers();
+    });
     return () => {
+      outgoing.dispose();
+      outgoingTypingRef.current = null;
+      clearAllTypingExpiryTimers();
+      setTypingPeers({});
       s.removeAllListeners();
       s.disconnect();
       setSocket(null);
     };
-  }, [activeConversationId, apiBase, token]);
+  }, [
+    activeConversationId,
+    apiBase,
+    applyRemoteTypingPayload,
+    clearAllTypingExpiryTimers,
+    token,
+  ]);
+
+  useEffect(() => {
+    outgoingTypingRef.current?.syncDraft(draft);
+  }, [draft]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (typeof document === "undefined") {
+        return;
+      }
+      if (document.visibilityState === "hidden") {
+        outgoingTypingRef.current?.flushFalse();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  const activeConversation = useMemo(
+    () => conversations.find((c) => c.id === activeConversationId),
+    [conversations, activeConversationId],
+  );
+
+  const typingIndicatorText = useMemo(() => {
+    const isDirectChat = (activeConversation?.members.length ?? 0) === 2;
+    const names = Object.entries(typingPeers)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => v.displayName);
+    return formatTypingIndicatorText({
+      isDirectChat,
+      typingDisplayNames: names,
+    });
+  }, [activeConversation?.members.length, typingPeers]);
 
   const onAttachmentFileChosen = useCallback((file: File) => {
     setAttachmentError(null);
@@ -367,6 +504,7 @@ export function MessengerClient() {
   const sendMessage = useCallback(async () => {
     setError(null);
     setAttachmentError(null);
+    outgoingTypingRef.current?.flushFalse();
     const text = draft.trim();
     if (!socket?.connected || !activeConversationId) {
       return;
@@ -480,6 +618,10 @@ export function MessengerClient() {
         onCreateConversation={() => void createConversation()}
         onLogout={handleLogout}
         onDeleteMessage={(messageId, mode) => void deleteMessage(messageId, mode)}
+        typingIndicatorText={typingIndicatorText}
+        onTypingComposerBlur={() => {
+          outgoingTypingRef.current?.flushFalse();
+        }}
       />
     </div>
   );

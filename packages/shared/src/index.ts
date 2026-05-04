@@ -38,6 +38,8 @@ export const SocketEvents = {
   MESSAGE_SEND: "message:send",
   MESSAGE_NEW: "message:new",
   MESSAGE_DELETED_FOR_EVERYONE: "message:deleted-for-everyone",
+  TYPING_SEND: "typing:send",
+  TYPING_UPDATE: "typing:update",
   ERROR: "error",
 } as const;
 
@@ -67,3 +69,17 @@ export type MessageSendPayload = {
   attachment?: { fileId: string };
   clientMessageId?: string;
 };
+
+export {
+  CHAT_TYPING_EMIT_MIN_INTERVAL_MS,
+  CHAT_TYPING_LOCAL_STOP_DEBOUNCE_MS,
+  CHAT_TYPING_PRESENCE_TTL_MS,
+  formatTypingIndicatorText,
+  resolveTypingDisplayName,
+} from "./chat-typing";
+export type {
+  TypingPresencePayload,
+  TypingProfileLike,
+  TypingSendPayload,
+} from "./chat-typing";
+export { OutgoingTypingController } from "./outgoing-typing-controller";

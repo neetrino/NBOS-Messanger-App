@@ -13,13 +13,16 @@ import {
   SocketEvents,
   type MessageDeletedForEveryonePayload,
   type MessageNewPayload,
+  type TypingPresencePayload,
 } from '@app-messenger/shared';
 import { parseStoredAttachment } from '../messages/attachment-json.util';
 import type { Server, Socket } from 'socket.io';
 import { ConversationsService } from '../conversations/conversations.service';
 import { MessagesService } from '../messages/messages.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { ConversationIdDto } from './dto/conversation-id.dto';
 import { MessageSendDto } from './dto/message-send.dto';
+import { TypingSendDto } from './dto/typing-send.dto';
 
 type JwtPayload = { sub: string };
 
@@ -43,6 +46,7 @@ export class ChatGateway implements OnGatewayConnection {
     private readonly jwt: JwtService,
     private readonly messages: MessagesService,
     private readonly conversations: ConversationsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async handleConnection(client: AuthedSocket): Promise<void> {
@@ -78,6 +82,43 @@ export class ChatGateway implements OnGatewayConnection {
     @MessageBody() body: ConversationIdDto,
   ): Promise<void> {
     await client.leave(roomName(body.conversationId));
+  }
+
+  @SubscribeMessage(SocketEvents.TYPING_SEND)
+  async onTypingSend(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: TypingSendDto,
+  ): Promise<void> {
+    const userId = client.data.userId;
+    if (!userId) {
+      return;
+    }
+    await this.conversations.assertMember(userId, body.conversationId);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, email: true },
+    });
+    if (!user) {
+      return;
+    }
+    const trimmedName = user.name?.trim();
+    const at = user.email.indexOf('@');
+    const userName =
+      trimmedName && trimmedName.length > 0
+        ? trimmedName
+        : at > 0
+          ? user.email.slice(0, at)
+          : user.email;
+    const payload: TypingPresencePayload = {
+      conversationId: body.conversationId,
+      userId,
+      userName,
+      isTyping: body.isTyping,
+      timestamp: new Date().toISOString(),
+    };
+    client
+      .to(roomName(body.conversationId))
+      .emit(SocketEvents.TYPING_UPDATE, payload);
   }
 
   @SubscribeMessage(SocketEvents.MESSAGE_SEND)

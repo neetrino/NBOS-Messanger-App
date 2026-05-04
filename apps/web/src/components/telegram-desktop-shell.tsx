@@ -90,6 +90,8 @@ export type TelegramDesktopShellProps = {
   onCreateConversation: () => void | Promise<void>;
   onLogout: () => void;
   onDeleteMessage: (messageId: string, mode: "for-me" | "for-everyone") => void;
+  typingIndicatorText: string | null;
+  onTypingComposerBlur: () => void;
 };
 
 function displayName(user: MemberUser): string {
@@ -186,6 +188,8 @@ export function TelegramDesktopShell({
   onCreateConversation,
   onLogout,
   onDeleteMessage,
+  typingIndicatorText,
+  onTypingComposerBlur,
 }: TelegramDesktopShellProps) {
   const isMdUp = useMdUp();
   const [mobilePane, setMobilePane] = useState<"list" | "chat">("list");
@@ -258,8 +262,8 @@ export function TelegramDesktopShell({
 
   const messageScrollKey = useMemo(
     () =>
-      `${activeConversationId}:${messages.length}:${messages[messages.length - 1]?.id ?? ""}`,
-    [activeConversationId, messages],
+      `${activeConversationId}:${messages.length}:${messages[messages.length - 1]?.id ?? ""}:${typingIndicatorText ?? ""}`,
+    [activeConversationId, messages, typingIndicatorText],
   );
 
   useLayoutEffect(() => {
@@ -837,6 +841,17 @@ export function TelegramDesktopShell({
             )}
           </div>
 
+          {typingIndicatorText && activeConversationId ? (
+            <div
+              className="shrink-0 border-t border-transparent px-4 pb-1 pt-0.5"
+              aria-live="polite"
+            >
+              <p className="text-[12px] leading-snug text-[#8b92a0]">
+                {typingIndicatorText}
+              </p>
+            </div>
+          ) : null}
+
           <div
             ref={composerStripRef}
             className="shrink-0 border-t border-[#1f2a3a] bg-[#17212b] px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
@@ -937,6 +952,9 @@ export function TelegramDesktopShell({
                   value={draft}
                   rows={1}
                   onChange={(e) => onDraftChange(e.target.value)}
+                  onBlur={() => {
+                    onTypingComposerBlur();
+                  }}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter" || e.shiftKey) {
                       return;
